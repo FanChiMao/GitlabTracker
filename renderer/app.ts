@@ -56,7 +56,6 @@ type IssueItem = {
   reason: string | null;
 };
 
-
 type DiscussionNote = {
   id: number;
   body: string;
@@ -127,7 +126,13 @@ type BurndownMilestone = {
   series: BurndownPoint[];
 };
 
-type GanttQuickView = 'custom' | 'overdue' | 'due_soon' | 'unassigned' | 'no_due_date' | 'active_milestones';
+type GanttQuickView =
+  | 'custom'
+  | 'overdue'
+  | 'due_soon'
+  | 'unassigned'
+  | 'no_due_date'
+  | 'active_milestones';
 type GanttGroupBy = 'none' | 'milestone' | 'assignee' | 'module';
 type GanttRiskFlag = 'overdue' | 'due_soon' | 'no_due_date' | 'unassigned' | 'stale';
 type TimelineViewMode = 'gantt' | 'calendar';
@@ -162,7 +167,6 @@ type LifecycleData = {
   histogram: { bucket: string; count: number }[];
   throughput: { month: string; count: number }[];
 };
-
 
 type AnalyticsResponse = {
   burndown: BurndownMilestone[];
@@ -217,7 +221,12 @@ async function applyAppVersionLabel(): Promise<void> {
   }
 }
 
-const ACTION_BTNS = ['btn-sync-now', 'btn-refresh-dashboard', 'btn-generate-report', 'btn-save-config'];
+const ACTION_BTNS = [
+  'btn-sync-now',
+  'btn-refresh-dashboard',
+  'btn-generate-report',
+  'btn-save-config',
+];
 function setActionButtonsEnabled(enabled: boolean): void {
   for (const id of ACTION_BTNS) {
     const btn = byId<HTMLButtonElement>(id);
@@ -376,27 +385,38 @@ type MilestoneSortEntry = {
   name: string;
   start: Date | null;
   due: Date | null;
+  hasExplicitDue: boolean;
 };
 
 function compareMilestoneEntries(left: MilestoneSortEntry, right: MilestoneSortEntry): number {
-  const leftPrimary = left.start?.getTime() ?? left.due?.getTime() ?? Number.POSITIVE_INFINITY;
-  const rightPrimary = right.start?.getTime() ?? right.due?.getTime() ?? Number.POSITIVE_INFINITY;
-  if (leftPrimary !== rightPrimary) return leftPrimary - rightPrimary;
+  const leftPrimary = left.start?.getTime() ?? left.due?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const rightPrimary = right.start?.getTime() ?? right.due?.getTime() ?? Number.NEGATIVE_INFINITY;
+  if (leftPrimary !== rightPrimary) return rightPrimary - leftPrimary;
 
-  const leftSecondary = left.due?.getTime() ?? left.start?.getTime() ?? Number.POSITIVE_INFINITY;
-  const rightSecondary = right.due?.getTime() ?? right.start?.getTime() ?? Number.POSITIVE_INFINITY;
+  const leftSecondary = left.due?.getTime() ?? left.start?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const rightSecondary = right.due?.getTime() ?? right.start?.getTime() ?? Number.NEGATIVE_INFINITY;
   if (leftSecondary !== rightSecondary) return leftSecondary - rightSecondary;
 
   return left.name.localeCompare(right.name, 'zh-Hant');
 }
 
-function mergeMilestoneDate(current: Date | null, candidate: Date | null): Date | null {
+function mergeEarlierDate(current: Date | null, candidate: Date | null): Date | null {
   if (!candidate) return current;
   if (!current) return candidate;
   return candidate.getTime() < current.getTime() ? candidate : current;
 }
 
-function getSortedMilestoneNamesFromIssues(issues: IssueItem[]): string[] {
+function mergeLaterDate(current: Date | null, candidate: Date | null): Date | null {
+  if (!candidate) return current;
+  if (!current) return candidate;
+  return candidate.getTime() > current.getTime() ? candidate : current;
+}
+
+function formatMilestoneOptionLabel(milestone: MilestoneSortEntry): string {
+  return milestone.name;
+}
+
+function getSortedMilestoneEntriesFromIssues(issues: IssueItem[]): MilestoneSortEntry[] {
   const milestones = new Map<string, MilestoneSortEntry>();
 
   for (const issue of issues) {
@@ -406,16 +426,62 @@ function getSortedMilestoneNamesFromIssues(issues: IssueItem[]): string[] {
       name: issue.milestone,
       start: null,
       due: null,
+      hasExplicitDue: false,
     };
 
-    existing.start = mergeMilestoneDate(existing.start, startOfDay(issue.milestone_start_date));
-    existing.due = mergeMilestoneDate(existing.due, startOfDay(issue.milestone_due_date) ?? startOfDay(issue.due_date));
+    existing.start = mergeEarlierDate(existing.start, startOfDay(issue.milestone_start_date));
+
+    const milestoneDue = startOfDay(issue.milestone_due_date);
+    if (milestoneDue) {
+      existing.due = mergeLaterDate(existing.due, milestoneDue);
+      existing.hasExplicitDue = true;
+    } else if (!existing.hasExplicitDue) {
+      existing.due = mergeLaterDate(existing.due, startOfDay(issue.due_date));
+    }
+
     milestones.set(issue.milestone, existing);
   }
 
-  return Array.from(milestones.values())
-    .sort(compareMilestoneEntries)
-    .map((milestone) => milestone.name);
+  return Array.from(milestones.values()).sort(compareMilestoneEntries);
+}
+
+function getDefaultMilestoneFilterValue(
+  milestones: MilestoneSortEntry[],
+  currentValue: string,
+): string {
+  if (currentValue && milestones.some((milestone) => milestone.name === currentValue)) {
+    return currentValue;
+  }
+
+  const today = startOfDay(new Date());
+  if (!today) return '';
+
+  const currentMilestone = milestones.find((milestone) => {
+    if (!milestone.start && !milestone.due) return false;
+
+    const afterStart = !milestone.start || milestone.start.getTime() <= today.getTime();
+    const beforeDue = !milestone.due || today.getTime() <= milestone.due.getTime();
+    return afterStart && beforeDue;
+  });
+
+  return currentMilestone?.name ?? '';
+}
+
+function populateMilestoneFilterOptions(
+  select: HTMLSelectElement,
+  milestones: MilestoneSortEntry[],
+): void {
+  const nextValue = getDefaultMilestoneFilterValue(milestones, select.value);
+  select.innerHTML =
+    '<option value="">全部</option>' +
+    milestones
+      .map(
+        (milestone) =>
+          `<option value="${escapeHtml(milestone.name)}">${escapeHtml(formatMilestoneOptionLabel(milestone))}</option>`,
+      )
+      .join('');
+  select.value = nextValue;
+  select.title = select.selectedOptions[0]?.textContent ?? '';
 }
 
 function compareIssuesForGantt(a: IssueItem, b: IssueItem): number {
@@ -508,7 +574,8 @@ function getIssueLinkTypeLabel(linkType: string, direction: LinkedItemInfo['dire
 
 function getDeliveryHighlight(issue: IssueItem): { kind: string; label: string; value: string } {
   const dueDate = startOfDay(issue.due_date);
-  const isOverdue = issue.state !== 'closed' && !!dueDate && dueDate < (startOfDay(new Date()) as Date);
+  const isOverdue =
+    issue.state !== 'closed' && !!dueDate && dueDate < (startOfDay(new Date()) as Date);
   const status = getGanttStatusKind(issue);
   if (status === 'closed') {
     return { kind: 'done', label: '目前狀態', value: '已關閉' };
@@ -517,7 +584,11 @@ function getDeliveryHighlight(issue: IssueItem): { kind: string; label: string; 
     return { kind: 'overdue', label: '目前狀態', value: '逾期' };
   }
   if (status === 'in_progress') {
-    return { kind: 'review', label: '目前狀態', value: `進行中 · ${getResolvedMergeRequestCount(issue)} MR` };
+    return {
+      kind: 'review',
+      label: '目前狀態',
+      value: `進行中 · ${getResolvedMergeRequestCount(issue)} MR`,
+    };
   }
   return { kind: 'open', label: '目前狀態', value: '開啟中' };
 }
@@ -546,7 +617,8 @@ function readConfigForm(): AppConfig {
     token: byId<HTMLInputElement>('gitlab-token').value.trim(),
     project_ref: projectRef,
     project_ref_history: normalizeProjectRefHistory(projectRef, getProjectRefHistoryFromUi()),
-    import_file: (document.getElementById('import-file') as HTMLInputElement | null)?.value.trim() || '',
+    import_file:
+      (document.getElementById('import-file') as HTMLInputElement | null)?.value.trim() || '',
     gemini_api_key: byId<HTMLInputElement>('gemini-api-key').value.trim(),
     enable_daily_sync: byId<HTMLInputElement>('enable-daily-sync').checked,
     daily_sync_time: byId<HTMLInputElement>('daily-sync-time').value,
@@ -588,12 +660,16 @@ function renderSummary(data: DashboardResponse): void {
     ['逾期或逼近到期', data.summary.near_due_count],
   ];
 
-  container.innerHTML = items.map(([label, value]) => `
+  container.innerHTML = items
+    .map(
+      ([label, value]) => `
     <div class="summary-item">
       <span>${escapeHtml(String(label))}</span>
       <strong>${value ?? 0}</strong>
     </div>
-  `).join('');
+  `,
+    )
+    .join('');
 }
 
 function renderNewIssues(items: IssueItem[]): void {
@@ -602,7 +678,9 @@ function renderNewIssues(items: IssueItem[]): void {
     tbody.innerHTML = '<tr><td colspan="6" class="empty-state">本週沒有新增 issue。</td></tr>';
     return;
   }
-  tbody.innerHTML = items.map((item) => `
+  tbody.innerHTML = items
+    .map(
+      (item) => `
     <tr data-iid="${item.iid}" style="cursor:pointer">
       <td>#${item.iid}</td>
       <td>${escapeHtml(item.module ?? '-')}</td>
@@ -611,14 +689,16 @@ function renderNewIssues(items: IssueItem[]): void {
       <td>${escapeHtml(item.milestone ?? '-')}</td>
       <td><span class="state-badge ${item.state}">${item.state === 'opened' ? '開啟' : '關閉'}</span></td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join('');
 }
 
 function renderRecentIssues(): void {
   const hours = Number(byId<HTMLInputElement>('recent-hours').value) || 6;
   const cutoff = new Date(Date.now() - hours * 3600_000);
   const recent = state.allIssues
-    .filter(i => i.updated_at && new Date(i.updated_at) >= cutoff)
+    .filter((i) => i.updated_at && new Date(i.updated_at) >= cutoff)
     .sort((a, b) => new Date(b.updated_at!).getTime() - new Date(a.updated_at!).getTime());
 
   const tbody = byId<HTMLTableSectionElement>('table-recent-issues');
@@ -626,13 +706,14 @@ function renderRecentIssues(): void {
     tbody.innerHTML = `<tr><td colspan="7" class="empty-state">近 ${hours} 小時內沒有更新的 Issue。</td></tr>`;
     return;
   }
-  tbody.innerHTML = recent.map((item) => {
-    const discBadge = item.has_new_discussions
-      ? '<span class="disc-badge new" title="有新討論">💬 新</span>'
-      : item.user_notes_count > 0
-        ? `<span class="disc-badge" title="${item.user_notes_count} 則討論">💬 ${item.user_notes_count}</span>`
-        : '<span class="disc-badge none">—</span>';
-    return `
+  tbody.innerHTML = recent
+    .map((item) => {
+      const discBadge = item.has_new_discussions
+        ? '<span class="disc-badge new" title="有新討論">💬 新</span>'
+        : item.user_notes_count > 0
+          ? `<span class="disc-badge" title="${item.user_notes_count} 則討論">💬 ${item.user_notes_count}</span>`
+          : '<span class="disc-badge none">—</span>';
+      return `
     <tr data-iid="${item.iid}" style="cursor:pointer">
       <td>#${item.iid}</td>
       <td>${escapeHtml(item.module ?? '-')}</td>
@@ -643,7 +724,8 @@ function renderRecentIssues(): void {
       <td>${fmtDate(item.updated_at)}</td>
     </tr>
   `;
-  }).join('');
+    })
+    .join('');
 }
 
 function renderCards(containerId: string, items: IssueItem[], emptyText: string): void {
@@ -652,17 +734,24 @@ function renderCards(containerId: string, items: IssueItem[], emptyText: string)
     container.innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
     return;
   }
-  container.innerHTML = items.map((item) => `
+  container.innerHTML = items
+    .map(
+      (item) => `
     <article class="issue-card" data-iid="${item.iid}" ${item.web_url ? `data-url="${escapeHtml(item.web_url)}"` : ''} style="cursor:pointer">
       <h4>${item.web_url ? `<a class="issue-link" href="${escapeHtml(item.web_url)}" target="_blank" onclick="event.stopPropagation()">#${item.iid}</a>` : `#${item.iid}`} ${escapeHtml(item.title)}</h4>
       <p>模組：${escapeHtml(item.module ?? '-')} ｜ 狀態：<span class="state-badge ${item.state}">${item.state === 'opened' ? '開啟' : '關閉'}</span> ｜ 負責人：${escapeHtml((item.assignees || []).join(', ') || '-')}</p>
       <p>Milestone：${escapeHtml(item.milestone ?? '-')} ｜ 更新時間：${fmtDate(item.updated_at)}</p>
       ${item.note || item.reason ? `<p>${escapeHtml(item.note ?? item.reason ?? '')}</p>` : ''}
       <div class="tags">
-        ${(item.labels || []).slice(0, 5).map((label: string) => `<span class="tag">${escapeHtml(label)}</span>`).join('')}
+        ${(item.labels || [])
+          .slice(0, 5)
+          .map((label: string) => `<span class="tag">${escapeHtml(label)}</span>`)
+          .join('')}
       </div>
     </article>
-  `).join('');
+  `,
+    )
+    .join('');
 }
 
 /* ══════════════════════════════════════════════
@@ -670,6 +759,7 @@ function renderCards(containerId: string, items: IssueItem[], emptyText: string)
    ══════════════════════════════════════════════ */
 let _ganttRafId = 0;
 function scheduleGanttRender(issues: IssueItem[]): void {
+  updateTimelineFilterIndicators();
   cancelAnimationFrame(_ganttRafId);
   _ganttRafId = requestAnimationFrame(() => {
     const mode = state.timelineViewMode;
@@ -700,7 +790,16 @@ function enhanceTimelineControls(): void {
   const stateLabel = byId<HTMLSelectElement>('gantt-state-filter').closest('label');
   const legend = controls.querySelector<HTMLElement>('.timeline-legend');
 
-  if (!quickLabel || !groupLabel || !monthLabel || !viewLabel || !milestoneLabel || !assigneeLabel || !stateLabel || !legend) {
+  if (
+    !quickLabel ||
+    !groupLabel ||
+    !monthLabel ||
+    !viewLabel ||
+    !milestoneLabel ||
+    !assigneeLabel ||
+    !stateLabel ||
+    !legend
+  ) {
     return;
   }
 
@@ -724,7 +823,9 @@ function enhanceTimelineControls(): void {
   if (periodNav) {
     periodNav.classList.add('timeline-period-nav');
   }
-  const monthTextNode = Array.from(monthLabel.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
+  const monthTextNode = Array.from(monthLabel.childNodes).find(
+    (node) => node.nodeType === Node.TEXT_NODE,
+  );
   if (monthTextNode) {
     monthTextNode.textContent = '區間';
   }
@@ -733,7 +834,12 @@ function enhanceTimelineControls(): void {
   const filtersPanel = document.createElement('details');
   filtersPanel.className = 'timeline-filters-panel';
   const summary = document.createElement('summary');
-  summary.textContent = '更多篩選';
+  const summaryLabel = document.createElement('span');
+  summaryLabel.textContent = '更多篩選';
+  const summaryCount = document.createElement('span');
+  summaryCount.className = 'timeline-filter-count';
+  summaryCount.hidden = true;
+  summary.append(summaryLabel, summaryCount);
   const filtersGrid = document.createElement('div');
   filtersGrid.className = 'timeline-filters-grid';
   filtersGrid.append(milestoneLabel, assigneeLabel, stateLabel);
@@ -742,6 +848,36 @@ function enhanceTimelineControls(): void {
   controls.innerHTML = '';
   controls.append(mainControls, periodControls, filtersPanel, legend);
   controls.dataset.enhanced = 'true';
+  updateTimelineFilterIndicators();
+}
+
+function updateTimelineFilterIndicators(): void {
+  const quickView = getById<HTMLSelectElement>('gantt-quick-view');
+  const milestoneFilter = getById<HTMLSelectElement>('gantt-milestone-filter');
+  const assigneeFilter = getById<HTMLSelectElement>('gantt-assignee-filter');
+  const stateFilter = getById<HTMLSelectElement>('gantt-state-filter');
+
+  quickView?.closest('label')?.classList.toggle('is-active', quickView.value !== 'custom');
+  milestoneFilter?.closest('label')?.classList.toggle('is-active', Boolean(milestoneFilter.value));
+  assigneeFilter?.closest('label')?.classList.toggle('is-active', Boolean(assigneeFilter.value));
+  stateFilter?.closest('label')?.classList.toggle('is-active', Boolean(stateFilter.value));
+
+  const filtersPanel = document.querySelector<HTMLDetailsElement>('.timeline-filters-panel');
+  const filtersSummary = filtersPanel?.querySelector<HTMLElement>('summary');
+  const filtersCount = filtersSummary?.querySelector<HTMLElement>('.timeline-filter-count');
+  const activeFilterCount = [milestoneFilter, assigneeFilter, stateFilter].filter((filter) =>
+    Boolean(filter?.value),
+  ).length;
+
+  filtersPanel?.classList.toggle('is-active', activeFilterCount > 0);
+  if (filtersSummary) {
+    filtersSummary.title =
+      activeFilterCount > 0 ? `已套用 ${activeFilterCount} 個篩選條件` : '更多篩選';
+  }
+  if (filtersCount) {
+    filtersCount.hidden = activeFilterCount === 0;
+    filtersCount.textContent = String(activeFilterCount);
+  }
 }
 
 function getTimelineRangeMode(): TimelineRangeMode {
@@ -791,7 +927,12 @@ function getSelectedMonth(): { year: number; month: number; minDate: Date; maxDa
   return { year: y, month: m, minDate, maxDate };
 }
 
-function getSelectedTimelineWindow(): { mode: TimelineRangeMode; start: Date; end: Date; label: string } {
+function getSelectedTimelineWindow(): {
+  mode: TimelineRangeMode;
+  start: Date;
+  end: Date;
+  label: string;
+} {
   const mode = getTimelineRangeMode();
   if (mode === 'week') {
     const input = byId<HTMLInputElement>('gantt-week');
@@ -825,7 +966,8 @@ function getSelectedTimelineWindow(): { mode: TimelineRangeMode; start: Date; en
 function shiftMonth(delta: number): void {
   if (getTimelineRangeMode() === 'week') {
     const weekInput = byId<HTMLInputElement>('gantt-week');
-    const baseWeek = parseIsoWeekValue(weekInput.value || state.ganttWeek) ?? getStartOfWeek(new Date());
+    const baseWeek =
+      parseIsoWeekValue(weekInput.value || state.ganttWeek) ?? getStartOfWeek(new Date());
     baseWeek.setDate(baseWeek.getDate() + delta * 7);
     const value = getIsoWeekValue(baseWeek);
     weekInput.value = value;
@@ -840,31 +982,38 @@ function shiftMonth(delta: number): void {
   scheduleGanttRender(state.allIssues);
 }
 
-
-
 /* ══════════════════════════════════════════════
    TAB 3: EXCEL-LIKE TABLE
    ══════════════════════════════════════════════ */
 function populateGanttFiltersEnhanced(issues: IssueItem[]): void {
-  const milestones = getSortedMilestoneNamesFromIssues(issues);
-  const assignees = [...new Set(issues.flatMap(i => i.assignees || []))].filter(Boolean).sort();
+  const milestones = getSortedMilestoneEntriesFromIssues(issues);
+  const assignees = [...new Set(issues.flatMap((i) => i.assignees || []))].filter(Boolean).sort();
 
   const mSel = byId<HTMLSelectElement>('gantt-milestone-filter');
   const aSel = byId<HTMLSelectElement>('gantt-assignee-filter');
-  const mVal = mSel.value;
   const aVal = aSel.value;
 
-  mSel.innerHTML = '<option value="">全部</option>' + milestones.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
-  aSel.innerHTML = '<option value="">全部</option>' + assignees.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('');
+  populateMilestoneFilterOptions(mSel, milestones);
+  aSel.innerHTML =
+    '<option value="">全部</option>' +
+    assignees.map((a) => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('');
 
-  mSel.value = mVal;
   aSel.value = aVal;
+  updateTimelineFilterIndicators();
 }
 
-function applyGanttQuickView(issues: IssueItem[], today: Date, quickView: GanttQuickView): IssueItem[] {
+function applyGanttQuickView(
+  issues: IssueItem[],
+  today: Date,
+  quickView: GanttQuickView,
+): IssueItem[] {
   switch (quickView) {
     case 'overdue':
-      return issues.filter((issue) => issue.state !== 'closed' && (startOfDay(issue.due_date)?.getTime() ?? Number.POSITIVE_INFINITY) < today.getTime());
+      return issues.filter(
+        (issue) =>
+          issue.state !== 'closed' &&
+          (startOfDay(issue.due_date)?.getTime() ?? Number.POSITIVE_INFINITY) < today.getTime(),
+      );
     case 'due_soon':
       return issues.filter((issue) => {
         const due = startOfDay(issue.due_date);
@@ -883,7 +1032,10 @@ function applyGanttQuickView(issues: IssueItem[], today: Date, quickView: GanttQ
   }
 }
 
-function getGanttGroupInfo(issue: IssueItem, groupBy: GanttGroupBy): { key: string; label: string; avatarUrl?: string | null } {
+function getGanttGroupInfo(
+  issue: IssueItem,
+  groupBy: GanttGroupBy,
+): { key: string; label: string; avatarUrl?: string | null } {
   switch (groupBy) {
     case 'milestone':
       return { key: issue.milestone || '__none__', label: issue.milestone || '未排 Milestone' };
@@ -896,9 +1048,14 @@ function getGanttGroupInfo(issue: IssueItem, groupBy: GanttGroupBy): { key: stri
   }
 }
 
-function buildGanttGroupsEnhanced(issues: IssueItem[], groupBy: GanttGroupBy): Array<{ key: string; label: string; items: IssueItem[] }> {
+function buildGanttGroupsEnhanced(
+  issues: IssueItem[],
+  groupBy: GanttGroupBy,
+): Array<{ key: string; label: string; items: IssueItem[] }> {
   if (groupBy === 'none') {
-    return [{ key: '__all__', label: '全部 Issue', items: [...issues].sort(compareIssuesForGantt) }];
+    return [
+      { key: '__all__', label: '全部 Issue', items: [...issues].sort(compareIssuesForGantt) },
+    ];
   }
 
   const groups = new Map<string, { key: string; label: string; items: IssueItem[] }>();
@@ -915,17 +1072,34 @@ function buildGanttGroupsEnhanced(issues: IssueItem[], groupBy: GanttGroupBy): A
     .sort((left, right) => left.label.localeCompare(right.label, 'zh-Hant'));
 }
 
-function getVisibleMilestoneDeadlines(issues: IssueItem[], minDate: Date, maxDate: Date): Array<{ milestone: string; dueDate: Date }> {
+function getVisibleMilestoneDeadlines(
+  issues: IssueItem[],
+  minDate: Date,
+  maxDate: Date,
+): Array<{ milestone: string; dueDate: Date }> {
   function getPrimaryAssigneeAvatar(issue: IssueItem): string | null {
     return issue.assignee_details?.find((item) => item.avatar_url)?.avatar_url ?? null;
   }
 
-  function buildGanttGroupsWithAvatar(sourceIssues: IssueItem[], groupBy: GanttGroupBy): Array<{ key: string; label: string; avatarUrl: string | null; items: IssueItem[] }> {
+  function buildGanttGroupsWithAvatar(
+    sourceIssues: IssueItem[],
+    groupBy: GanttGroupBy,
+  ): Array<{ key: string; label: string; avatarUrl: string | null; items: IssueItem[] }> {
     if (groupBy === 'none') {
-      return [{ key: '__all__', label: '全部 Issue', avatarUrl: null, items: [...sourceIssues].sort(compareIssuesForGantt) }];
+      return [
+        {
+          key: '__all__',
+          label: '全部 Issue',
+          avatarUrl: null,
+          items: [...sourceIssues].sort(compareIssuesForGantt),
+        },
+      ];
     }
 
-    const groups = new Map<string, { key: string; label: string; avatarUrl: string | null; items: IssueItem[] }>();
+    const groups = new Map<
+      string,
+      { key: string; label: string; avatarUrl: string | null; items: IssueItem[] }
+    >();
     for (const issue of sourceIssues) {
       const group = getGanttGroupInfo(issue, groupBy);
       if (!groups.has(group.key)) {
@@ -950,7 +1124,9 @@ function getVisibleMilestoneDeadlines(issues: IssueItem[], minDate: Date, maxDat
   }
 
   if (!state.analytics) return [];
-  const visibleMilestones = new Set(issues.map((issue) => issue.milestone).filter(Boolean) as string[]);
+  const visibleMilestones = new Set(
+    issues.map((issue) => issue.milestone).filter(Boolean) as string[],
+  );
 
   return state.analytics.burndown
     .filter((milestone) => visibleMilestones.has(milestone.milestone))
@@ -983,8 +1159,37 @@ function getIssueTimelineRange(
   const milestoneStart = startOfDay(issue.milestone_start_date);
   const milestoneEnd = startOfDay(issue.milestone_due_date);
   const mappedRange = issue.milestone ? milestoneRanges.get(issue.milestone) : undefined;
-  const scheduleStart = milestoneStart ?? mappedRange?.start ?? startOfDay(issue.created_at) ?? today;
-  const scheduleEnd = milestoneEnd ?? mappedRange?.end ?? startOfDay(issue.due_date) ?? (scheduleStart > today ? scheduleStart : today);
+  const resolvedMilestoneStart = milestoneStart ?? mappedRange?.start;
+  const resolvedMilestoneEnd = milestoneEnd ?? mappedRange?.end;
+
+  if (issue.state === 'closed') {
+    if (resolvedMilestoneStart || resolvedMilestoneEnd) {
+      const closedStart =
+        resolvedMilestoneStart ?? resolvedMilestoneEnd ?? startOfDay(issue.created_at) ?? today;
+      const closedEnd =
+        resolvedMilestoneEnd ??
+        resolvedMilestoneStart ??
+        startOfDay(issue.closed_at) ??
+        closedStart;
+      return {
+        start: closedStart,
+        end: closedEnd < closedStart ? closedStart : closedEnd,
+      };
+    }
+
+    const closedStart = startOfDay(issue.created_at) ?? today;
+    const closedEnd = startOfDay(issue.closed_at) ?? closedStart;
+    return {
+      start: closedStart,
+      end: closedEnd < closedStart ? closedStart : closedEnd,
+    };
+  }
+
+  const scheduleStart = resolvedMilestoneStart ?? startOfDay(issue.created_at) ?? today;
+  const scheduleEnd =
+    resolvedMilestoneEnd ??
+    startOfDay(issue.due_date) ??
+    (scheduleStart > today ? scheduleStart : today);
 
   return {
     start: scheduleStart,
@@ -1012,7 +1217,8 @@ function renderGanttEnhanced(issues: IssueItem[]): void {
 
   let filtered = [...issues];
   if (milestoneFilter) filtered = filtered.filter((issue) => issue.milestone === milestoneFilter);
-  if (assigneeFilter) filtered = filtered.filter((issue) => (issue.assignees || []).includes(assigneeFilter));
+  if (assigneeFilter)
+    filtered = filtered.filter((issue) => (issue.assignees || []).includes(assigneeFilter));
   if (stateFilter) filtered = filtered.filter((issue) => issue.state === stateFilter);
 
   filtered = applyGanttQuickView(filtered, today, quickView);
@@ -1071,11 +1277,14 @@ function renderGanttEnhanced(issues: IssueItem[]): void {
       prevMonth = monthKey;
     }
 
-    const showLabel = (i % labelInterval === 0) || day.getDate() === 1 || day.toISOString().slice(0, 10) === todayStr;
+    const showLabel =
+      i % labelInterval === 0 || day.getDate() === 1 || day.toISOString().slice(0, 10) === todayStr;
     const classes = [
       day.getDay() === 0 || day.getDay() === 6 ? 'weekend' : '',
       day.toISOString().slice(0, 10) === todayStr ? 'today' : '',
-    ].filter(Boolean).join(' ');
+    ]
+      .filter(Boolean)
+      .join(' ');
     dayHeaderHtml += `<div class="gantt-header-day ${classes}" style="width:${dayWidth}px">${showLabel ? day.getDate() : ''}</div>`;
   }
 
@@ -1117,25 +1326,29 @@ function renderGanttEnhanced(issues: IssueItem[]): void {
   let riskIssueCount = 0;
   for (const group of groups) {
     const collapsed = state.ganttCollapsedGroups.has(group.key);
-    const groupRiskCount = group.items.filter((issue) => getGanttRiskFlags(issue, today).length > 0).length;
+    const groupRiskCount = group.items.filter(
+      (issue) => getGanttRiskFlags(issue, today).length > 0,
+    ).length;
 
     if (groupBy !== 'none') {
-      const groupAvatar = groupBy === 'assignee'
-        ? (group.avatarUrl
+      const groupAvatar =
+        groupBy === 'assignee'
+          ? group.avatarUrl
             ? `<span class="gantt-group-avatar-shell"><img class="gantt-group-avatar" src="${escapeHtml(group.avatarUrl)}" alt="${escapeHtml(group.label)}" /></span>`
-            : `<span class="gantt-group-avatar-shell"><span class="gantt-group-avatar fallback">${escapeHtml(group.label.slice(0, 1).toUpperCase())}</span></span>`)
-        : '';
+            : `<span class="gantt-group-avatar-shell"><span class="gantt-group-avatar fallback">${escapeHtml(group.label.slice(0, 1).toUpperCase())}</span></span>`
+          : '';
       rowsHtml += `
         <div class="gantt-group-header" style="grid-template-columns:${labelWidth}px ${gridTotalWidth}px" data-group-key="${escapeHtml(group.key)}">
           <div class="gantt-group-title">
             <span class="gantt-group-toggle">${collapsed ? '+' : '-'}</span>
             ${groupAvatar}
             <strong>${escapeHtml(group.label)}</strong>
+            <div class="gantt-group-meta">
+              <span class="gantt-group-badge">${group.items.length} issues</span>
+              ${groupRiskCount ? `<span class="gantt-group-badge risk">${groupRiskCount} 風險</span>` : ''}
+            </div>
           </div>
-          <div class="gantt-group-meta">
-            <span class="gantt-group-badge">${group.items.length} items</span>
-            ${groupRiskCount ? `<span class="gantt-group-badge risk">${groupRiskCount} 風險</span>` : ''}
-          </div>
+          <div class="gantt-group-spacer"></div>
         </div>
       `;
     }
@@ -1143,7 +1356,11 @@ function renderGanttEnhanced(issues: IssueItem[]): void {
     if (collapsed) continue;
 
     for (const issue of group.items) {
-      const { start: scheduleStart, end: scheduleEnd } = getIssueTimelineRange(issue, milestoneRanges, today);
+      const { start: scheduleStart, end: scheduleEnd } = getIssueTimelineRange(
+        issue,
+        milestoneRanges,
+        today,
+      );
       const riskFlags = getGanttRiskFlags(issue, today);
       if (riskFlags.length > 0) riskIssueCount += 1;
 
@@ -1162,7 +1379,10 @@ function renderGanttEnhanced(issues: IssueItem[]): void {
       const riskClasses = riskFlags.map((flag) => `risk-${flag}`).join(' ');
       const riskTags = !riskFlags.length
         ? ''
-        : `<div class="gantt-risk-tags">${riskFlags.slice(0, 3).map((flag) => `<span class="risk-tag ${flag}">${getRiskFlagLabel(flag)}</span>`).join('')}</div>`;
+        : `<div class="gantt-risk-tags">${riskFlags
+            .slice(0, 3)
+            .map((flag) => `<span class="risk-tag ${flag}">${getRiskFlagLabel(flag)}</span>`)
+            .join('')}</div>`;
 
       rowsHtml += `
         <div class="gantt-row" style="grid-template-columns:${labelWidth}px ${gridTotalWidth}px">
@@ -1195,7 +1415,8 @@ function renderGanttEnhanced(issues: IssueItem[]): void {
   const todayIdx = dayIndex(today);
   const todayPx = todayIdx * dayWidth + dayWidth / 2;
   const groupLabel = groupBy === 'none' ? '不分組' : `依 ${groupBy} 分組`;
-  const quickViewLabel = byId<HTMLSelectElement>('gantt-quick-view').selectedOptions[0]?.textContent || '自訂';
+  const quickViewLabel =
+    byId<HTMLSelectElement>('gantt-quick-view').selectedOptions[0]?.textContent || '自訂';
   summary.textContent = `顯示 ${filtered.length} / ${issues.length} 筆，${groupLabel}，快速視圖：${quickViewLabel}${riskIssueCount ? `，共 ${riskIssueCount} 筆風險` : ''}`;
 
   container.setAttribute('data-risk-mode', 'highlight');
@@ -1264,19 +1485,21 @@ function renderGanttEnhanced(issues: IssueItem[]): void {
     });
   });
 
-  container.querySelectorAll<HTMLElement>('.gantt-group-header[data-group-key]').forEach((header) => {
-    header.addEventListener('click', (event) => {
-      const el = event.currentTarget as HTMLElement;
-      const key = el.dataset.groupKey;
-      if (!key) return;
-      if (state.ganttCollapsedGroups.has(key)) {
-        state.ganttCollapsedGroups.delete(key);
-      } else {
-        state.ganttCollapsedGroups.add(key);
-      }
-      scheduleGanttRender(state.allIssues);
+  container
+    .querySelectorAll<HTMLElement>('.gantt-group-header[data-group-key]')
+    .forEach((header) => {
+      header.addEventListener('click', (event) => {
+        const el = event.currentTarget as HTMLElement;
+        const key = el.dataset.groupKey;
+        if (!key) return;
+        if (state.ganttCollapsedGroups.has(key)) {
+          state.ganttCollapsedGroups.delete(key);
+        } else {
+          state.ganttCollapsedGroups.add(key);
+        }
+        scheduleGanttRender(state.allIssues);
+      });
     });
-  });
 }
 
 /* ══════════════════════════════════════════════
@@ -1302,7 +1525,8 @@ function renderCalendarView(issues: IssueItem[]): void {
 
   let filtered = [...issues];
   if (milestoneFilter) filtered = filtered.filter((i) => i.milestone === milestoneFilter);
-  if (assigneeFilter) filtered = filtered.filter((i) => (i.assignees || []).includes(assigneeFilter));
+  if (assigneeFilter)
+    filtered = filtered.filter((i) => (i.assignees || []).includes(assigneeFilter));
   if (stateFilter) filtered = filtered.filter((i) => i.state === stateFilter);
   filtered = applyGanttQuickView(filtered, today, quickView);
 
@@ -1345,14 +1569,17 @@ function renderCalendarView(issues: IssueItem[]): void {
 
   // Compute bar segments per issue: for each cell, determine if the issue
   // starts, continues, or ends on that day so we can render connected bars
-  function getBarSegment(issue: IssueItem, cellDate: Date): 'start' | 'middle' | 'end' | 'single' | null {
+  function getBarSegment(
+    issue: IssueItem,
+    cellDate: Date,
+  ): 'start' | 'middle' | 'end' | 'single' | null {
     const { start, end } = getIssueTimelineRange(issue, milestoneRanges, today);
     const cellStr = cellDate.toISOString().slice(0, 10);
     const startStr = start.toISOString().slice(0, 10);
     const endStr = end.toISOString().slice(0, 10);
     if (cellDate < start || cellDate > end) return null;
     const isStart = cellStr === startStr || cellDate.getDay() === 1; // bar start or Monday (new row)
-    const isEnd = cellStr === endStr || cellDate.getDay() === 0;     // bar end or Sunday (end of row)
+    const isEnd = cellStr === endStr || cellDate.getDay() === 0; // bar end or Sunday (end of row)
     if (isStart && isEnd) return 'single';
     if (isStart) return 'start';
     if (isEnd) return 'end';
@@ -1383,7 +1610,9 @@ function renderCalendarView(issues: IssueItem[]): void {
       inMonth ? '' : 'other-month',
       isToday ? 'today' : '',
       isWeekend ? 'weekend' : '',
-    ].filter(Boolean).join(' ');
+    ]
+      .filter(Boolean)
+      .join(' ');
 
     html += `<div class="${classes}">`;
     html += `<div class="cal-date">${cell.getDate()}</div>`;
@@ -1402,7 +1631,9 @@ function renderCalendarView(issues: IssueItem[]): void {
       if (issue.state !== 'closed' && issueDue && issueDue < today) barClass = 'overdue';
 
       const showLabel = seg === 'start' || seg === 'single';
-      const label = showLabel ? `#${issue.iid} ${issue.title.length > 12 ? issue.title.slice(0, 12) + '...' : issue.title}` : '';
+      const label = showLabel
+        ? `#${issue.iid} ${issue.title.length > 12 ? issue.title.slice(0, 12) + '...' : issue.title}`
+        : '';
 
       html += `<div class="cal-bar ${barClass} seg-${seg}"
                     data-iid="${issue.iid}"
@@ -1461,12 +1692,25 @@ function getPrimaryAssigneeAvatarForGantt(issue: IssueItem): string | null {
   return issue.assignee_details?.find((item) => item.avatar_url)?.avatar_url ?? null;
 }
 
-function buildGanttGroupsForSafeRender(issues: IssueItem[], groupBy: GanttGroupBy): Array<{ key: string; label: string; avatarUrl: string | null; items: IssueItem[] }> {
+function buildGanttGroupsForSafeRender(
+  issues: IssueItem[],
+  groupBy: GanttGroupBy,
+): Array<{ key: string; label: string; avatarUrl: string | null; items: IssueItem[] }> {
   if (groupBy === 'none') {
-    return [{ key: '__all__', label: '全部 Issue', avatarUrl: null, items: [...issues].sort(compareIssuesForGantt) }];
+    return [
+      {
+        key: '__all__',
+        label: '全部 Issue',
+        avatarUrl: null,
+        items: [...issues].sort(compareIssuesForGantt),
+      },
+    ];
   }
 
-  const groups = new Map<string, { key: string; label: string; avatarUrl: string | null; items: IssueItem[] }>();
+  const groups = new Map<
+    string,
+    { key: string; label: string; avatarUrl: string | null; items: IssueItem[] }
+  >();
   for (const issue of issues) {
     const group = getGanttGroupInfo(issue, groupBy);
     if (!groups.has(group.key)) {
@@ -1540,7 +1784,8 @@ function renderGanttEnhancedSafe(issues: IssueItem[]): void {
 
   let filtered = [...issues];
   if (milestoneFilter) filtered = filtered.filter((issue) => issue.milestone === milestoneFilter);
-  if (assigneeFilter) filtered = filtered.filter((issue) => (issue.assignees || []).includes(assigneeFilter));
+  if (assigneeFilter)
+    filtered = filtered.filter((issue) => (issue.assignees || []).includes(assigneeFilter));
   if (stateFilter) filtered = filtered.filter((issue) => issue.state === stateFilter);
   filtered = applyGanttQuickView(filtered, today, quickView);
   filtered = filtered.filter((issue) => {
@@ -1567,7 +1812,8 @@ function renderGanttEnhancedSafe(issues: IssueItem[]): void {
   const gridTotalWidth = totalDays * dayWidth;
   const todayStr = today.toISOString().slice(0, 10);
 
-  const dayIndex = (date: Date): number => Math.round((date.getTime() - windowRange.start.getTime()) / 86400000);
+  const dayIndex = (date: Date): number =>
+    Math.round((date.getTime() - windowRange.start.getTime()) / 86400000);
   const groups = buildGanttGroupsForSafeRender(filtered, groupBy);
   const deadlineMarkers = getVisibleMilestoneDeadlines(filtered, windowRange.start, windowRange.end)
     .map((marker) => {
@@ -1635,25 +1881,29 @@ function renderGanttEnhancedSafe(issues: IssueItem[]): void {
   let riskIssueCount = 0;
   groups.forEach((group) => {
     const collapsed = state.ganttCollapsedGroups.has(group.key);
-    const groupRiskCount = group.items.filter((issue) => getGanttRiskFlags(issue, today).length > 0).length;
+    const groupRiskCount = group.items.filter(
+      (issue) => getGanttRiskFlags(issue, today).length > 0,
+    ).length;
 
     if (groupBy !== 'none') {
-      const groupAvatar = groupBy === 'assignee'
-        ? (group.avatarUrl
+      const groupAvatar =
+        groupBy === 'assignee'
+          ? group.avatarUrl
             ? `<span class="gantt-group-avatar-shell"><span class="gantt-group-avatar fallback">${escapeHtml(group.label.slice(0, 1).toUpperCase())}</span><img class="gantt-group-avatar" src="${escapeHtml(group.avatarUrl)}" alt="${escapeHtml(group.label)}" /></span>`
-            : `<span class="gantt-group-avatar-shell"><span class="gantt-group-avatar fallback">${escapeHtml(group.label.slice(0, 1).toUpperCase())}</span></span>`)
-        : '';
+            : `<span class="gantt-group-avatar-shell"><span class="gantt-group-avatar fallback">${escapeHtml(group.label.slice(0, 1).toUpperCase())}</span></span>`
+          : '';
       rowsHtml += `
         <div class="gantt-group-header" style="grid-template-columns:${labelWidth}px ${gridTotalWidth}px" data-group-key="${escapeHtml(group.key)}">
           <div class="gantt-group-title">
             <span class="gantt-group-toggle">${collapsed ? '+' : '-'}</span>
             ${groupAvatar}
             <strong>${escapeHtml(group.label)}</strong>
+            <div class="gantt-group-meta">
+              <span class="gantt-group-badge">${group.items.length} issues</span>
+              ${groupRiskCount ? `<span class="gantt-group-badge risk">${groupRiskCount} 風險</span>` : ''}
+            </div>
           </div>
-          <div class="gantt-group-meta">
-            <span class="gantt-group-badge">${group.items.length} items</span>
-            ${groupRiskCount ? `<span class="gantt-group-badge risk">${groupRiskCount} risk</span>` : ''}
-          </div>
+          <div class="gantt-group-spacer"></div>
         </div>
       `;
     }
@@ -1672,42 +1922,49 @@ function renderGanttEnhancedSafe(issues: IssueItem[]): void {
       const clampedEnd = end > windowRange.end ? windowRange.end : end;
       const startPx = dayIndex(clampedStart) * dayWidth;
       const endPx = dayIndex(clampedEnd) * dayWidth;
-      const widthPx = Math.max(dayWidth, (endPx - startPx) + dayWidth - 4);
+      const widthPx = Math.max(dayWidth, endPx - startPx + dayWidth - 4);
 
       const barClass = issue.state === 'closed' ? 'closed' : 'opened';
       const isOverdue = issue.state !== 'closed' && riskFlags.includes('overdue');
       const effectiveBarClass = isOverdue ? 'overdue' : barClass;
-      const deliveryClass = statusKind === 'closed'
-        ? 'delivery-done'
-        : statusKind === 'in_progress'
-          ? 'delivery-review'
-          : '';
+      const deliveryClass =
+        statusKind === 'closed'
+          ? 'delivery-done'
+          : statusKind === 'in_progress'
+            ? 'delivery-review'
+            : '';
       const riskClasses = riskFlags.map((flag) => `risk-${flag}`).join(' ');
-      const primaryStatusLabel = issue.state === 'closed'
-        ? '已關閉'
-        : isOverdue
-          ? '逾期'
-          : mergeRequestCount > 0
-            ? '進行中'
-            : '開啟中';
-      const primaryStatusClass = issue.state === 'closed'
-        ? 'closed'
-        : isOverdue
-          ? 'overdue'
-          : mergeRequestCount > 0
-            ? 'in_progress'
-            : 'open';
-      const statusTags = `<span class="gantt-status-pill ${primaryStatusClass}">${primaryStatusLabel}</span>`;
-      const riskTags = riskFlags.length
-        ? `<div class="gantt-risk-tags">${riskFlags.slice(0, 3).map((flag) => `<span class="risk-tag ${flag}">${getRiskFlagLabel(flag)}</span>`).join('')}</div>`
-        : '';
+      const primaryStatusLabel =
+        issue.state === 'closed'
+          ? '已關閉'
+          : isOverdue
+            ? '逾期'
+            : mergeRequestCount > 0
+              ? '進行中'
+              : '開啟中';
+      const primaryStatusClass =
+        issue.state === 'closed'
+          ? 'closed'
+          : isOverdue
+            ? 'overdue'
+            : mergeRequestCount > 0
+              ? 'in_progress'
+              : 'open';
+      const visibleRiskFlags = isOverdue
+        ? riskFlags.filter((flag) => flag !== 'overdue')
+        : riskFlags;
+      const chipsHtml = [
+        `<span class="gantt-status-pill ${primaryStatusClass}">${primaryStatusLabel}</span>`,
+        ...visibleRiskFlags
+          .slice(0, 3)
+          .map((flag) => `<span class="risk-tag ${flag}">${getRiskFlagLabel(flag)}</span>`),
+      ].join('');
       rowsHtml += `
         <div class="gantt-row" style="grid-template-columns:${labelWidth}px ${gridTotalWidth}px">
           <div class="gantt-row-label" data-iid="${issue.iid}" title="#${issue.iid} ${escapeHtml(issue.title)}">
             <strong>#${issue.iid}</strong> ${escapeHtml(issue.title.length > 34 ? `${issue.title.slice(0, 34)}...` : issue.title)}
             <small>${escapeHtml(assigneeText)} · ${escapeHtml(issue.milestone ?? 'No milestone')} · ${escapeHtml(issue.module ?? 'No module')}</small>
-            <div class="gantt-status-pills">${statusTags}</div>
-            ${riskTags}
+            <div class="gantt-status-pills">${chipsHtml}</div>
           </div>
           <div class="gantt-row-bars">
             <div class="gantt-bar ${effectiveBarClass} ${deliveryClass} ${riskClasses}"
@@ -1736,7 +1993,8 @@ function renderGanttEnhancedSafe(issues: IssueItem[]): void {
   const todayIdx = dayIndex(today);
   const todayPx = todayIdx * dayWidth + dayWidth / 2;
   const groupLabel = groupBy === 'none' ? 'No grouping' : `Group by ${groupBy}`;
-  const quickViewLabel = byId<HTMLSelectElement>('gantt-quick-view').selectedOptions[0]?.textContent || 'All issues';
+  const quickViewLabel =
+    byId<HTMLSelectElement>('gantt-quick-view').selectedOptions[0]?.textContent || 'All issues';
   summary.textContent = `顯示 ${filtered.length} / ${issues.length} 筆，${windowRange.mode === 'week' ? '週檢視' : '月檢視'} ${windowRange.label}，${groupLabel}，Focus：${quickViewLabel}${riskIssueCount ? `，${riskIssueCount} 筆風險` : ''}`;
   requestIssueLinkDataForVisibleIssues(filtered);
 
@@ -1761,11 +2019,17 @@ function renderGanttEnhancedSafe(issues: IssueItem[]): void {
     </div>
   `;
 
-  container.querySelectorAll<HTMLImageElement>('.gantt-group-avatar-shell .gantt-group-avatar').forEach((avatar) => {
-    avatar.addEventListener('error', () => {
-      avatar.remove();
-    }, { once: true });
-  });
+  container
+    .querySelectorAll<HTMLImageElement>('.gantt-group-avatar-shell .gantt-group-avatar')
+    .forEach((avatar) => {
+      avatar.addEventListener(
+        'error',
+        () => {
+          avatar.remove();
+        },
+        { once: true },
+      );
+    });
 
   container.querySelectorAll<HTMLElement>('.gantt-bar').forEach((bar) => {
     bar.addEventListener('mouseenter', (event) => {
@@ -1782,7 +2046,7 @@ function renderGanttEnhancedSafe(issues: IssueItem[]): void {
         <p>Module: ${el.dataset.module}</p>
         <p>Range: ${el.dataset.created} - ${el.dataset.due}</p>
         <p>Risk: ${el.dataset.risk}</p>
-        <p>Click to open detail, double click for GitLab</p>
+        <p>Click to open detail</p>
       `;
       tooltip.classList.add('visible');
     });
@@ -1813,19 +2077,21 @@ function renderGanttEnhancedSafe(issues: IssueItem[]): void {
     });
   });
 
-  container.querySelectorAll<HTMLElement>('.gantt-group-header[data-group-key]').forEach((header) => {
-    header.addEventListener('click', (event) => {
-      const el = event.currentTarget as HTMLElement;
-      const key = el.dataset.groupKey;
-      if (!key) return;
-      if (state.ganttCollapsedGroups.has(key)) {
-        state.ganttCollapsedGroups.delete(key);
-      } else {
-        state.ganttCollapsedGroups.add(key);
-      }
-      scheduleGanttRender(state.allIssues);
+  container
+    .querySelectorAll<HTMLElement>('.gantt-group-header[data-group-key]')
+    .forEach((header) => {
+      header.addEventListener('click', (event) => {
+        const el = event.currentTarget as HTMLElement;
+        const key = el.dataset.groupKey;
+        if (!key) return;
+        if (state.ganttCollapsedGroups.has(key)) {
+          state.ganttCollapsedGroups.delete(key);
+        } else {
+          state.ganttCollapsedGroups.add(key);
+        }
+        scheduleGanttRender(state.allIssues);
+      });
     });
-  });
 }
 
 function renderCalendarViewSafe(issues: IssueItem[]): void {
@@ -1850,7 +2116,8 @@ function renderCalendarViewSafe(issues: IssueItem[]): void {
 
   let filtered = [...issues];
   if (milestoneFilter) filtered = filtered.filter((issue) => issue.milestone === milestoneFilter);
-  if (assigneeFilter) filtered = filtered.filter((issue) => (issue.assignees || []).includes(assigneeFilter));
+  if (assigneeFilter)
+    filtered = filtered.filter((issue) => (issue.assignees || []).includes(assigneeFilter));
   if (stateFilter) filtered = filtered.filter((issue) => issue.state === stateFilter);
   filtered = applyGanttQuickView(filtered, today, quickView);
   filtered = filtered.filter((issue) => {
@@ -1883,7 +2150,10 @@ function renderCalendarViewSafe(issues: IssueItem[]): void {
     }
   }
 
-  const getBarSegment = (issue: IssueItem, cellDate: Date): 'start' | 'middle' | 'end' | 'single' | null => {
+  const getBarSegment = (
+    issue: IssueItem,
+    cellDate: Date,
+  ): 'start' | 'middle' | 'end' | 'single' | null => {
     const { start, end } = getIssueTimelineRange(issue, milestoneRanges, today);
     if (cellDate < start || cellDate > end) return null;
 
@@ -1902,9 +2172,10 @@ function renderCalendarViewSafe(issues: IssueItem[]): void {
   container.classList.toggle('week-mode', windowRange.mode === 'week');
 
   const weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const orderedWeekdays = windowRange.mode === 'week'
-    ? cells.map((day) => weekdayNames[(day.getDay() + 6) % 7])
-    : weekdayNames;
+  const orderedWeekdays =
+    windowRange.mode === 'week'
+      ? cells.map((day) => weekdayNames[(day.getDay() + 6) % 7])
+      : weekdayNames;
 
   let html = '<div class="cal-grid">';
   html += '<div class="cal-header-row">';
@@ -1931,7 +2202,8 @@ function renderCalendarViewSafe(issues: IssueItem[]): void {
   html += '<div class="cal-body">';
   cells.forEach((cell) => {
     const cellKey = cell.toISOString().slice(0, 10);
-    const inCurrentMonth = cell.getMonth() === windowRange.start.getMonth() || windowRange.mode === 'week';
+    const inCurrentMonth =
+      cell.getMonth() === windowRange.start.getMonth() || windowRange.mode === 'week';
     const cellIssues = filtered
       .filter((issue) => {
         const { start, end } = getIssueTimelineRange(issue, milestoneRanges, today);
@@ -1963,9 +2235,10 @@ function renderCalendarViewSafe(issues: IssueItem[]): void {
         barClass = 'overdue';
       }
 
-      const label = windowRange.mode === 'week' || segment === 'start' || segment === 'single'
-        ? `#${issue.iid} ${issue.title.length > 18 ? `${issue.title.slice(0, 18)}...` : issue.title}`
-        : '';
+      const label =
+        windowRange.mode === 'week' || segment === 'start' || segment === 'single'
+          ? `#${issue.iid} ${issue.title.length > 18 ? `${issue.title.slice(0, 18)}...` : issue.title}`
+          : '';
 
       html += `
         <div class="cal-bar ${barClass} seg-${segment}"
@@ -2032,27 +2305,28 @@ function getFilteredSortedIssues(): IssueItem[] {
   // Search
   const search = byId<HTMLInputElement>('table-search').value.trim().toLowerCase();
   if (search) {
-    filtered = filtered.filter(i =>
-      String(i.iid).includes(search) ||
-      (i.title || '').toLowerCase().includes(search) ||
-      (i.module || '').toLowerCase().includes(search) ||
-      (i.assignees || []).some(a => a.toLowerCase().includes(search)) ||
-      (i.milestone || '').toLowerCase().includes(search) ||
-      (i.labels || []).some(l => l.toLowerCase().includes(search))
+    filtered = filtered.filter(
+      (i) =>
+        String(i.iid).includes(search) ||
+        (i.title || '').toLowerCase().includes(search) ||
+        (i.module || '').toLowerCase().includes(search) ||
+        (i.assignees || []).some((a) => a.toLowerCase().includes(search)) ||
+        (i.milestone || '').toLowerCase().includes(search) ||
+        (i.labels || []).some((l) => l.toLowerCase().includes(search)),
     );
   }
 
   // State filter
   const stateFilter = byId<HTMLSelectElement>('table-state-filter').value;
-  if (stateFilter) filtered = filtered.filter(i => i.state === stateFilter);
+  if (stateFilter) filtered = filtered.filter((i) => i.state === stateFilter);
 
   // Milestone filter
   const msFilter = byId<HTMLSelectElement>('table-milestone-filter').value;
-  if (msFilter) filtered = filtered.filter(i => i.milestone === msFilter);
+  if (msFilter) filtered = filtered.filter((i) => i.milestone === msFilter);
 
   // Label filter
   const labelFilter = byId<HTMLSelectElement>('table-label-filter').value;
-  if (labelFilter) filtered = filtered.filter(i => (i.labels || []).includes(labelFilter));
+  if (labelFilter) filtered = filtered.filter((i) => (i.labels || []).includes(labelFilter));
 
   // Date range filter (by created_at)
   const dateStart = byId<HTMLInputElement>('table-date-start').value;
@@ -2060,7 +2334,7 @@ function getFilteredSortedIssues(): IssueItem[] {
   if (dateStart) {
     const ds = new Date(dateStart);
     ds.setHours(0, 0, 0, 0);
-    filtered = filtered.filter(i => {
+    filtered = filtered.filter((i) => {
       if (!i.created_at) return false;
       return new Date(i.created_at) >= ds;
     });
@@ -2068,7 +2342,7 @@ function getFilteredSortedIssues(): IssueItem[] {
   if (dateEnd) {
     const de = new Date(dateEnd);
     de.setHours(23, 59, 59, 999);
-    filtered = filtered.filter(i => {
+    filtered = filtered.filter((i) => {
       if (!i.created_at) return false;
       return new Date(i.created_at) <= de;
     });
@@ -2079,7 +2353,10 @@ function getFilteredSortedIssues(): IssueItem[] {
   filtered.sort((a: any, b: any) => {
     let av = a[key];
     let bv = b[key];
-    if (key === 'assignees') { av = (av || []).join(', '); bv = (bv || []).join(', '); }
+    if (key === 'assignees') {
+      av = (av || []).join(', ');
+      bv = (bv || []).join(', ');
+    }
     if (av == null) av = '';
     if (bv == null) bv = '';
     if (typeof av === 'number' && typeof bv === 'number') return asc ? av - bv : bv - av;
@@ -2101,7 +2378,9 @@ function renderSpreadsheet(): void {
     return;
   }
 
-  tbody.innerHTML = filtered.map((item, idx) => `
+  tbody.innerHTML = filtered
+    .map(
+      (item, idx) => `
     <tr data-iid="${item.iid}" data-url="${escapeHtml(item.web_url ?? '')}">
       <td class="row-num">${idx + 1}</td>
       <td><a class="issue-link" href="${escapeHtml(item.web_url ?? '#')}" target="_blank" style="color:var(--accent);text-decoration:none" onclick="event.stopPropagation()">#${item.iid}</a></td>
@@ -2110,15 +2389,20 @@ function renderSpreadsheet(): void {
       <td title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</td>
       <td>${escapeHtml((item.assignees || []).join(', ') || '-')}</td>
       <td>${escapeHtml(item.milestone ?? '-')}</td>
-      <td><div class="cell-labels">${(item.labels || []).slice(0, 3).map(l => `<span class="tag">${escapeHtml(l)}</span>`).join('')}</div></td>
+      <td><div class="cell-labels">${(item.labels || [])
+        .slice(0, 3)
+        .map((l) => `<span class="tag">${escapeHtml(l)}</span>`)
+        .join('')}</div></td>
       <td>${fmtShortDate(item.created_at)}</td>
       <td>${fmtShortDate(item.updated_at)}</td>
       <td>${fmtShortDate(item.due_date)}</td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join('');
 
   // Update sort header styles
-  document.querySelectorAll('.spreadsheet-wrap th[data-sort]').forEach(th => {
+  document.querySelectorAll('.spreadsheet-wrap th[data-sort]').forEach((th) => {
     const el = th as HTMLElement;
     const key = el.dataset.sort!;
     el.classList.toggle('sorted', key === state.tableSort.key);
@@ -2130,16 +2414,16 @@ function renderSpreadsheet(): void {
 }
 
 function populateTableFilters(issues: IssueItem[]): void {
-  const milestones = getSortedMilestoneNamesFromIssues(issues);
+  const milestones = getSortedMilestoneEntriesFromIssues(issues);
   const mSel = byId<HTMLSelectElement>('table-milestone-filter');
-  const mVal = mSel.value;
-  mSel.innerHTML = '<option value="">全部</option>' + milestones.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
-  mSel.value = mVal;
+  populateMilestoneFilterOptions(mSel, milestones);
 
-  const labels = [...new Set(issues.flatMap(i => i.labels || []))].filter(Boolean).sort();
+  const labels = [...new Set(issues.flatMap((i) => i.labels || []))].filter(Boolean).sort();
   const lSel = byId<HTMLSelectElement>('table-label-filter');
   const lVal = lSel.value;
-  lSel.innerHTML = '<option value="">全部</option>' + labels.map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
+  lSel.innerHTML =
+    '<option value="">全部</option>' +
+    labels.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
   lSel.value = lVal;
 }
 
@@ -2162,11 +2446,15 @@ function renderBurndownChart(ms: BurndownMilestone): void {
   const pad = { top: 20, right: 20, bottom: 40, left: 45 };
   const chartW = W - pad.left - pad.right;
   const chartH = H - pad.top - pad.bottom;
-  const maxY = Math.max(...series.map(p => Math.max(p.open, p.total, p.ideal ?? 0)), 1);
+  const maxY = Math.max(...series.map((p) => Math.max(p.open, p.total, p.ideal ?? 0)), 1);
   const n = series.length;
 
-  function x(i: number): number { return pad.left + (i / Math.max(n - 1, 1)) * chartW; }
-  function y(v: number): number { return pad.top + chartH - (v / maxY) * chartH; }
+  function x(i: number): number {
+    return pad.left + (i / Math.max(n - 1, 1)) * chartW;
+  }
+  function y(v: number): number {
+    return pad.top + chartH - (v / maxY) * chartH;
+  }
 
   function polyline(data: number[], color: string, dashed = false): string {
     const pts = data.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
@@ -2191,12 +2479,13 @@ function renderBurndownChart(ms: BurndownMilestone): void {
     xLabels += `<text x="${x(i)}" y="${H - 5}" text-anchor="middle" fill="var(--text-muted)" font-size="10">${d}</text>`;
   }
 
-  const openData = series.map(p => p.open);
-  const idealData = series.map(p => p.ideal ?? 0);
-  const closedData = series.map(p => p.closed);
+  const openData = series.map((p) => p.open);
+  const idealData = series.map((p) => p.ideal ?? 0);
+  const closedData = series.map((p) => p.closed);
 
   // Fill area under open line
-  const openArea = `M${x(0).toFixed(1)},${y(0).toFixed(1)} ` +
+  const openArea =
+    `M${x(0).toFixed(1)},${y(0).toFixed(1)} ` +
     openData.map((v, i) => `L${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ') +
     ` L${x(n - 1).toFixed(1)},${y(0).toFixed(1)} Z`;
 
@@ -2234,7 +2523,8 @@ function renderBurndownChartSafe(ms: BurndownMilestone): void {
   const statsDiv = byId<HTMLDivElement>('burndown-stats');
 
   if (!ms.series.length) {
-    container.innerHTML = '<div class="empty-state">這個 Milestone 目前沒有可用的 burndown 資料。</div>';
+    container.innerHTML =
+      '<div class="empty-state">這個 Milestone 目前沒有可用的 burndown 資料。</div>';
     statsDiv.innerHTML = '';
     return;
   }
@@ -2245,13 +2535,20 @@ function renderBurndownChartSafe(ms: BurndownMilestone): void {
   const padding = { top: 20, right: 20, bottom: 40, left: 45 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const maxY = Math.max(ms.total, ...series.map((point) => Math.max(point.open, point.closed, point.total, point.ideal ?? 0)), 1);
+  const maxY = Math.max(
+    ms.total,
+    ...series.map((point) => Math.max(point.open, point.closed, point.total, point.ideal ?? 0)),
+    1,
+  );
   const pointCount = series.length;
 
-  const x = (index: number): number => padding.left + (index / Math.max(pointCount - 1, 1)) * chartWidth;
+  const x = (index: number): number =>
+    padding.left + (index / Math.max(pointCount - 1, 1)) * chartWidth;
   const y = (value: number): number => padding.top + chartHeight - (value / maxY) * chartHeight;
   const buildPolyline = (values: number[], color: string, dashed = false): string => {
-    const points = values.map((value, index) => `${x(index).toFixed(1)},${y(value).toFixed(1)}`).join(' ');
+    const points = values
+      .map((value, index) => `${x(index).toFixed(1)},${y(value).toFixed(1)}`)
+      .join(' ');
     return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2" ${dashed ? 'stroke-dasharray="6,4"' : ''} />`;
   };
 
@@ -2272,9 +2569,10 @@ function renderBurndownChartSafe(ms: BurndownMilestone): void {
   const openData = series.map((point) => point.open);
   const closedData = series.map((point) => point.closed);
   const idealData = series.map((point) => point.ideal ?? 0);
-  const openArea = `M${x(0).toFixed(1)},${y(0).toFixed(1)} `
-    + openData.map((value, index) => `L${x(index).toFixed(1)},${y(value).toFixed(1)}`).join(' ')
-    + ` L${x(pointCount - 1).toFixed(1)},${y(0).toFixed(1)} Z`;
+  const openArea =
+    `M${x(0).toFixed(1)},${y(0).toFixed(1)} ` +
+    openData.map((value, index) => `L${x(index).toFixed(1)},${y(value).toFixed(1)}`).join(' ') +
+    ` L${x(pointCount - 1).toFixed(1)},${y(0).toFixed(1)} Z`;
 
   container.innerHTML = `
     <svg viewBox="0 0 ${width} ${height}" class="burndown-svg">
@@ -2312,7 +2610,7 @@ function renderWorkloadHeatmap(workload: WorkloadEntry[]): void {
     return;
   }
 
-  const maxOpened = Math.max(...workload.map(w => w.opened), 1);
+  const maxOpened = Math.max(...workload.map((w) => w.opened), 1);
 
   container.innerHTML = `
     <div class="workload-table">
@@ -2324,22 +2622,27 @@ function renderWorkloadHeatmap(workload: WorkloadEntry[]): void {
         <span class="wl-num wl-warn">逾期</span>
         <span class="wl-num wl-alert">3天內</span>
       </div>
-      ${workload.map(w => {
-        const pct = (w.opened / maxOpened) * 100;
-        const hue = w.overdue > 0 ? 0 : w.due_soon > 0 ? 35 : w.opened > maxOpened * 0.7 ? 0 : 220;
-        const barColor = w.overdue > 0
-          ? 'var(--red-400)'
-          : w.due_soon > 0
-            ? 'var(--yellow-400)'
-            : w.opened > maxOpened * 0.7
-              ? 'var(--orange-400)'
-              : 'var(--accent)';
-        return `
+      ${workload
+        .map((w) => {
+          const pct = (w.opened / maxOpened) * 100;
+          const hue =
+            w.overdue > 0 ? 0 : w.due_soon > 0 ? 35 : w.opened > maxOpened * 0.7 ? 0 : 220;
+          const barColor =
+            w.overdue > 0
+              ? 'var(--red-400)'
+              : w.due_soon > 0
+                ? 'var(--yellow-400)'
+                : w.opened > maxOpened * 0.7
+                  ? 'var(--orange-400)'
+                  : 'var(--accent)';
+          return `
           <div class="workload-row ${w.overdue > 0 ? 'has-overdue' : ''}">
             <span class="wl-name" title="${escapeHtml(w.assignee)}">
-              ${w.avatar_url
-                ? `<img class="wl-avatar" src="${escapeHtml(w.avatar_url)}" alt="" />`
-                : `<span class="wl-avatar wl-avatar-placeholder">${escapeHtml(w.assignee.charAt(0).toUpperCase())}</span>`}
+              ${
+                w.avatar_url
+                  ? `<img class="wl-avatar" src="${escapeHtml(w.avatar_url)}" alt="" />`
+                  : `<span class="wl-avatar wl-avatar-placeholder">${escapeHtml(w.assignee.includes('未指派') ? '未' : w.assignee.charAt(0).toUpperCase())}</span>`
+              }
               ${escapeHtml(w.assignee)}
             </span>
             <span class="wl-bar">
@@ -2351,7 +2654,8 @@ function renderWorkloadHeatmap(workload: WorkloadEntry[]): void {
             <span class="wl-num wl-alert">${w.due_soon || '-'}</span>
           </div>
         `;
-      }).join('')}
+        })
+        .join('')}
     </div>
   `;
 }
@@ -2363,15 +2667,21 @@ function renderOverdueAlerts(alerts: AlertEntry[]): void {
     return;
   }
 
-  container.innerHTML = alerts.map(a => {
-    const severityLabel: Record<string, string> = { overdue: '已逾期', critical: '3 天內到期', warning: '7 天內到期' };
-    const severityIcon: Record<string, string> = { overdue: '🔴', critical: '🟡', warning: '🟠' };
-    const daysText = a.days_until_due < 0
-      ? `逾期 ${Math.abs(a.days_until_due)} 天`
-      : a.days_until_due === 0
-        ? '今天到期'
-        : `${a.days_until_due} 天後到期`;
-    return `
+  container.innerHTML = alerts
+    .map((a) => {
+      const severityLabel: Record<string, string> = {
+        overdue: '已逾期',
+        critical: '3 天內到期',
+        warning: '7 天內到期',
+      };
+      const severityIcon: Record<string, string> = { overdue: '🔴', critical: '🟡', warning: '🟠' };
+      const daysText =
+        a.days_until_due < 0
+          ? `逾期 ${Math.abs(a.days_until_due)} 天`
+          : a.days_until_due === 0
+            ? '今天到期'
+            : `${a.days_until_due} 天後到期`;
+      return `
       <div class="alert-item severity-${a.severity}" data-iid="${a.iid}" style="cursor:pointer">
         <span class="alert-icon">${severityIcon[a.severity] || ''}</span>
         <div class="alert-info">
@@ -2383,37 +2693,59 @@ function renderOverdueAlerts(alerts: AlertEntry[]): void {
         <span class="alert-badge ${a.severity}">${severityLabel[a.severity] || ''}</span>
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 }
 
 async function loadAnalytics(): Promise<void> {
   try {
     const data = await api<AnalyticsResponse>('/api/analytics');
     state.analytics = data;
-    const sortedBurndown = [...data.burndown].sort((left, right) => compareMilestoneEntries({
-      name: left.milestone,
-      start: startOfDay(left.start_date),
-      due: startOfDay(left.due_date),
-    }, {
-      name: right.milestone,
-      start: startOfDay(right.start_date),
-      due: startOfDay(right.due_date),
+    const sortedBurndown = [...data.burndown].sort((left, right) =>
+      compareMilestoneEntries(
+        {
+          name: left.milestone,
+          start: startOfDay(left.start_date),
+          due: startOfDay(left.due_date),
+          hasExplicitDue: Boolean(left.due_date),
+        },
+        {
+          name: right.milestone,
+          start: startOfDay(right.start_date),
+          due: startOfDay(right.due_date),
+          hasExplicitDue: Boolean(right.due_date),
+        },
+      ),
+    );
+    const burndownMilestones: MilestoneSortEntry[] = sortedBurndown.map((milestone) => ({
+      name: milestone.milestone,
+      start: startOfDay(milestone.start_date),
+      due: startOfDay(milestone.due_date),
+      hasExplicitDue: Boolean(milestone.due_date),
     }));
 
     // Populate milestone selector
     const sel = byId<HTMLSelectElement>('burndown-milestone-select');
-    const prev = sel.value;
-    sel.innerHTML = '<option value="">選擇 Milestone</option>' +
-      sortedBurndown.map(b => `<option value="${escapeHtml(b.milestone)}">${escapeHtml(b.milestone)}</option>`).join('');
-    if (prev) sel.value = prev;
+    const nextValue = getDefaultMilestoneFilterValue(burndownMilestones, sel.value);
+    sel.innerHTML =
+      '<option value="">選擇 Milestone</option>' +
+      burndownMilestones
+        .map(
+          (milestone) =>
+            `<option value="${escapeHtml(milestone.name)}">${escapeHtml(formatMilestoneOptionLabel(milestone))}</option>`,
+        )
+        .join('');
+    sel.value = nextValue;
+    sel.title = sel.selectedOptions[0]?.textContent ?? '';
 
     // Auto-select first milestone if none selected
     if (!sel.value && sortedBurndown.length) {
       sel.value = sortedBurndown[0].milestone;
+      sel.title = sel.selectedOptions[0]?.textContent ?? '';
     }
 
     // Render burndown for selected milestone
-    const selectedMs = data.burndown.find(b => b.milestone === sel.value);
+    const selectedMs = data.burndown.find((b) => b.milestone === sel.value);
     if (selectedMs) {
       renderBurndownChartSafe(selectedMs);
     }
@@ -2433,7 +2765,10 @@ async function loadAnalytics(): Promise<void> {
     // Render milestone progress
     renderMilestoneProgressSafe(data.burndown);
 
-    if (document.getElementById('tab-timeline')?.classList.contains('active') && state.allIssues.length > 0) {
+    if (
+      document.getElementById('tab-timeline')?.classList.contains('active') &&
+      state.allIssues.length > 0
+    ) {
       scheduleGanttRender(state.allIssues);
     }
   } catch (err) {
@@ -2459,8 +2794,18 @@ function renderLabelDistribution(labels: LabelDistEntry[]): void {
   const R = 80;
   const r = 50;
   const colors = [
-    '#7c9cff', '#8d72ff', '#4ade80', '#f87171', '#facc15', '#fb923c',
-    '#38bdf8', '#a78bfa', '#34d399', '#f472b6', '#94a3b8', '#e879f9',
+    '#7c9cff',
+    '#8d72ff',
+    '#4ade80',
+    '#f87171',
+    '#facc15',
+    '#fb923c',
+    '#38bdf8',
+    '#a78bfa',
+    '#34d399',
+    '#f472b6',
+    '#94a3b8',
+    '#e879f9',
   ];
 
   let segments = '';
@@ -2486,14 +2831,16 @@ function renderLabelDistribution(labels: LabelDistEntry[]): void {
   });
 
   // Legend
-  const legend = top.map((item, i) => {
-    const pct = ((item.total / total) * 100).toFixed(1);
-    return `<div class="label-legend-item">
+  const legend = top
+    .map((item, i) => {
+      const pct = ((item.total / total) * 100).toFixed(1);
+      return `<div class="label-legend-item">
       <span class="label-legend-dot" style="background:${colors[i % colors.length]}"></span>
       <span class="label-legend-name">${escapeHtml(item.label)}</span>
       <span class="label-legend-count">${item.total} (${pct}%)</span>
     </div>`;
-  }).join('');
+    })
+    .join('');
 
   container.innerHTML = `
     <div class="label-chart-layout">
@@ -2527,7 +2874,7 @@ function renderLifecycle(lc: LifecycleData): void {
 
   // Histogram SVG
   const hist = lc.histogram;
-  const maxH = Math.max(...hist.map(b => b.count), 1);
+  const maxH = Math.max(...hist.map((b) => b.count), 1);
   const barW = 60;
   const barGap = 8;
   const chartH = 140;
@@ -2554,13 +2901,14 @@ function renderLifecycle(lc: LifecycleData): void {
     const tpPad = { top: 15, right: 10, bottom: 25, left: 35 };
     const tpChartW = tpW - tpPad.left - tpPad.right;
     const tpChartH = tpH - tpPad.top - tpPad.bottom;
-    const maxTp = Math.max(...tp.map(t => t.count), 1);
+    const maxTp = Math.max(...tp.map((t) => t.count), 1);
 
     const tpX = (i: number) => tpPad.left + (i / Math.max(tp.length - 1, 1)) * tpChartW;
     const tpY = (v: number) => tpPad.top + tpChartH - (v / maxTp) * tpChartH;
 
     const pts = tp.map((t, i) => `${tpX(i).toFixed(1)},${tpY(t.count).toFixed(1)}`).join(' ');
-    const area = `M${tpX(0).toFixed(1)},${tpY(0).toFixed(1)} ` +
+    const area =
+      `M${tpX(0).toFixed(1)},${tpY(0).toFixed(1)} ` +
       tp.map((t, i) => `L${tpX(i).toFixed(1)},${tpY(t.count).toFixed(1)}`).join(' ') +
       ` L${tpX(tp.length - 1).toFixed(1)},${tpY(0).toFixed(1)} Z`;
 
@@ -2621,14 +2969,19 @@ function renderMilestoneProgress(burndown: BurndownMilestone[]): void {
 
   container.innerHTML = `
     <div class="ms-progress-list">
-      ${sorted.map(ms => {
-        const pct = ms.total > 0 ? Math.round((ms.closed / ms.total) * 100) : 0;
-        const isComplete = ms.open === 0 && ms.total > 0;
-        const isOverdue = ms.due_date && new Date(ms.due_date) < new Date() && !isComplete;
-        const barColor = isComplete ? 'var(--green-400)' : isOverdue ? 'var(--red-400)' : 'var(--accent)';
-        const statusClass = isComplete ? 'complete' : isOverdue ? 'overdue' : 'active';
-        const dueText = ms.due_date ?? '-';
-        return `
+      ${sorted
+        .map((ms) => {
+          const pct = ms.total > 0 ? Math.round((ms.closed / ms.total) * 100) : 0;
+          const isComplete = ms.open === 0 && ms.total > 0;
+          const isOverdue = ms.due_date && new Date(ms.due_date) < new Date() && !isComplete;
+          const barColor = isComplete
+            ? 'var(--green-400)'
+            : isOverdue
+              ? 'var(--red-400)'
+              : 'var(--accent)';
+          const statusClass = isComplete ? 'complete' : isOverdue ? 'overdue' : 'active';
+          const dueText = ms.due_date ?? '-';
+          return `
           <div class="ms-progress-item ${statusClass}">
             <div class="ms-progress-header">
               <span class="ms-progress-name" title="${escapeHtml(ms.milestone)}">${escapeHtml(ms.milestone)}</span>
@@ -2643,7 +2996,8 @@ function renderMilestoneProgress(burndown: BurndownMilestone[]): void {
             </div>
           </div>
         `;
-      }).join('')}
+        })
+        .join('')}
     </div>
   `;
 }
@@ -2663,15 +3017,23 @@ function renderMilestoneProgressSafe(burndown: BurndownMilestone[]): void {
 
   container.innerHTML = `
     <div class="ms-progress-list">
-      ${sorted.map((milestone) => {
-        const pct = milestone.total > 0 ? Math.round((milestone.closed / milestone.total) * 100) : 0;
-        const isComplete = milestone.open === 0 && milestone.total > 0;
-        const isOverdue = Boolean(milestone.due_date && new Date(milestone.due_date) < new Date() && !isComplete);
-        const barColor = isComplete ? 'var(--green-400)' : isOverdue ? 'var(--red-400)' : 'var(--accent)';
-        const statusClass = isComplete ? 'complete' : isOverdue ? 'overdue' : 'active';
-        const dueText = milestone.due_date ?? '-';
+      ${sorted
+        .map((milestone) => {
+          const pct =
+            milestone.total > 0 ? Math.round((milestone.closed / milestone.total) * 100) : 0;
+          const isComplete = milestone.open === 0 && milestone.total > 0;
+          const isOverdue = Boolean(
+            milestone.due_date && new Date(milestone.due_date) < new Date() && !isComplete,
+          );
+          const barColor = isComplete
+            ? 'var(--green-400)'
+            : isOverdue
+              ? 'var(--red-400)'
+              : 'var(--accent)';
+          const statusClass = isComplete ? 'complete' : isOverdue ? 'overdue' : 'active';
+          const dueText = milestone.due_date ?? '-';
 
-        return `
+          return `
           <div class="ms-progress-item ${statusClass}">
             <div class="ms-progress-header">
               <span class="ms-progress-name" title="${escapeHtml(milestone.milestone)}">${escapeHtml(milestone.milestone)}</span>
@@ -2686,7 +3048,8 @@ function renderMilestoneProgressSafe(burndown: BurndownMilestone[]): void {
             </div>
           </div>
         `;
-      }).join('')}
+        })
+        .join('')}
     </div>
   `;
 }
@@ -2712,21 +3075,21 @@ async function exportReportPdf(): Promise<void> {
    ══════════════════════════════════════════════ */
 function initTabs(): void {
   const tabBtns = document.querySelectorAll<HTMLButtonElement>('.tab-btn');
-  tabBtns.forEach(btn => {
+  tabBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab!;
-      tabBtns.forEach(b => {
+      tabBtns.forEach((b) => {
         b.classList.toggle('active', b === btn);
         b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
       });
-      document.querySelectorAll<HTMLDivElement>('.tab-content').forEach(panel => {
+      document.querySelectorAll<HTMLDivElement>('.tab-content').forEach((panel) => {
         panel.classList.toggle('active', panel.id === `tab-${tab}`);
       });
 
       // Lazy load data for tabs
       if (tab === 'analytics' && state.analytics) {
         const sel = byId<HTMLSelectElement>('burndown-milestone-select');
-        const ms = state.analytics.burndown.find(b => b.milestone === sel.value);
+        const ms = state.analytics.burndown.find((b) => b.milestone === sel.value);
         if (ms) renderBurndownChartSafe(ms);
         renderWorkloadHeatmap(state.analytics.workload);
         renderLabelDistribution(state.analytics.label_distribution);
@@ -2831,40 +3194,49 @@ function renderIssueDeliverySummary(issue: IssueItem): void {
   const mergeRequestCount = getResolvedMergeRequestCount(issue);
   const highlight = getDeliveryHighlight(issue);
   const dueDate = startOfDay(issue.due_date);
-  const isOverdue = issue.state !== 'closed' && !!dueDate && dueDate < (startOfDay(new Date()) as Date);
+  const isOverdue =
+    issue.state !== 'closed' && !!dueDate && dueDate < (startOfDay(new Date()) as Date);
   const cards = [
     { kind: highlight.kind, label: highlight.label, value: highlight.value },
     { kind: 'review', label: '相關 MRs', value: String(mergeRequestCount) },
     { kind: 'ready', label: '相關 Issues', value: String(linkedCount) },
   ];
-  const primaryStatusLabel = issue.state === 'closed'
-    ? '已關閉'
-    : isOverdue
-      ? '逾期'
-      : mergeRequestCount > 0
-        ? '進行中'
-        : '開啟中';
-  const primaryStatusClass = issue.state === 'closed'
-    ? 'closed'
-    : isOverdue
-      ? 'overdue'
-      : mergeRequestCount > 0
-        ? 'review'
-        : 'open';
+  const primaryStatusLabel =
+    issue.state === 'closed'
+      ? '已關閉'
+      : isOverdue
+        ? '逾期'
+        : mergeRequestCount > 0
+          ? '進行中'
+          : '開啟中';
+  const primaryStatusClass =
+    issue.state === 'closed'
+      ? 'closed'
+      : isOverdue
+        ? 'overdue'
+        : mergeRequestCount > 0
+          ? 'review'
+          : 'open';
   const chips = [
     `<span class="detail-chip ${primaryStatusClass}">${primaryStatusLabel}</span>`,
     mergeRequestCount > 0 ? `<span class="detail-chip review">MR ${mergeRequestCount}</span>` : '',
     linkedCount > 0 ? `<span class="detail-chip related">Linked ${linkedCount}</span>` : '',
-  ].filter(Boolean).join('');
+  ]
+    .filter(Boolean)
+    .join('');
 
   container.innerHTML = `
     <div class="detail-delivery-grid">
-      ${cards.map((card) => `
+      ${cards
+        .map(
+          (card) => `
         <div class="detail-delivery-card ${card.kind}">
           <span>${card.label}</span>
           <strong>${card.value}</strong>
         </div>
-      `).join('')}
+      `,
+        )
+        .join('')}
     </div>
     ${chips ? `<div class="detail-delivery-progress"><div class="detail-chip-row">${chips}</div></div>` : ''}
   `;
@@ -2875,7 +3247,9 @@ function renderMergeRequests(target: HTMLDivElement, mergeRequests: MergeRequest
     target.innerHTML = '<div class="empty-state">這張 Issue 目前沒有 linked MR。</div>';
     return;
   }
-  target.innerHTML = mergeRequests.map((mr) => `
+  target.innerHTML = mergeRequests
+    .map(
+      (mr) => `
     <div class="mr-card">
       <div class="mr-card-header">
         <div class="mr-card-title">
@@ -2891,7 +3265,9 @@ function renderMergeRequests(target: HTMLDivElement, mergeRequests: MergeRequest
         <span>${escapeHtml(mr.source_branch || '-')} → ${escapeHtml(mr.target_branch || '-')}</span>
       </div>
     </div>
-  `).join('');
+  `,
+    )
+    .join('');
 }
 
 function renderLinkedItems(target: HTMLDivElement, links: LinkedItemInfo[]): void {
@@ -2899,7 +3275,9 @@ function renderLinkedItems(target: HTMLDivElement, links: LinkedItemInfo[]): voi
     target.innerHTML = '<div class="empty-state">這張 Issue 目前沒有 linked items。</div>';
     return;
   }
-  target.innerHTML = links.map((link) => `
+  target.innerHTML = links
+    .map(
+      (link) => `
     <div class="linked-item-card">
       <div class="linked-item-header">
         <div class="linked-item-title">
@@ -2914,7 +3292,9 @@ function renderLinkedItems(target: HTMLDivElement, links: LinkedItemInfo[]): voi
         <span>Due: ${escapeHtml(fmtDate(link.issue.due_date))}</span>
       </div>
     </div>
-  `).join('');
+  `,
+    )
+    .join('');
 }
 
 async function loadIssueRelations(issue: IssueItem): Promise<void> {
@@ -2952,10 +3332,16 @@ async function loadIssueRelations(issue: IssueItem): Promise<void> {
 
 function requestIssueLinkDataForVisibleIssues(issues: IssueItem[]): void {
   const issuesForLinks = issues
-    .filter((issue) => !state.issueLinksByIid.has(issue.iid) && !state.pendingIssueLinkLoads.has(issue.iid))
+    .filter(
+      (issue) =>
+        !state.issueLinksByIid.has(issue.iid) && !state.pendingIssueLinkLoads.has(issue.iid),
+    )
     .slice(0, 24);
   const issuesForMergeRequests = issues
-    .filter((issue) => !state.mergeRequestsByIid.has(issue.iid) && !state.pendingMergeRequestLoads.has(issue.iid))
+    .filter(
+      (issue) =>
+        !state.mergeRequestsByIid.has(issue.iid) && !state.pendingMergeRequestLoads.has(issue.iid),
+    )
     .slice(0, 24);
 
   if (!issuesForLinks.length && !issuesForMergeRequests.length) return;
@@ -2987,7 +3373,9 @@ function requestIssueLinkDataForVisibleIssues(issues: IssueItem[]): void {
       Promise.allSettled(
         issuesForMergeRequests.map(async (issue) => {
           try {
-            const mergeRequests = await api<MergeRequestInfo[]>(`/api/issues/${issue.iid}/merge-requests`);
+            const mergeRequests = await api<MergeRequestInfo[]>(
+              `/api/issues/${issue.iid}/merge-requests`,
+            );
             state.mergeRequestsByIid.set(issue.iid, mergeRequests);
           } catch {
             state.mergeRequestsByIid.set(issue.iid, []);
@@ -3022,7 +3410,9 @@ function openIssueDetail(issue: IssueItem): void {
   byId<HTMLElement>('detail-due').textContent = issue.due_date ? fmtDate(issue.due_date) : '-';
 
   const labelsDiv = byId<HTMLDivElement>('detail-labels');
-  labelsDiv.innerHTML = (issue.labels || []).map(l => `<span class="tag">${escapeHtml(l)}</span>`).join('');
+  labelsDiv.innerHTML = (issue.labels || [])
+    .map((l) => `<span class="tag">${escapeHtml(l)}</span>`)
+    .join('');
   renderIssueDeliverySummary(issue);
 
   const link = byId<HTMLAnchorElement>('detail-link');
@@ -3061,7 +3451,11 @@ function closeIssueDetail(): void {
   document.body.style.overflow = '';
 }
 
-async function loadAISummary(iid: number, btn: HTMLButtonElement, box: HTMLDivElement): Promise<void> {
+async function loadAISummary(
+  iid: number,
+  btn: HTMLButtonElement,
+  box: HTMLDivElement,
+): Promise<void> {
   btn.disabled = true;
   btn.textContent = '⏳ 摘要產生中...';
   box.style.display = 'block';
@@ -3093,21 +3487,26 @@ function formatSummaryMarkdown(text: string): string {
 async function loadDiscussions(iid: number, container: HTMLDivElement): Promise<void> {
   try {
     const discussions = await api<Discussion[]>(`/api/issues/${iid}/discussions`);
-    const nonEmpty = discussions.filter(d => d.notes.length > 0);
+    const nonEmpty = discussions.filter((d) => d.notes.length > 0);
     if (!nonEmpty.length) {
       container.innerHTML = '<div class="empty-state">此 Issue 尚無討論留言。</div>';
       return;
     }
-    container.innerHTML = nonEmpty.map(disc => {
-      const isThread = disc.notes.length > 1;
-      return `
+    container.innerHTML = nonEmpty
+      .map((disc) => {
+        const isThread = disc.notes.length > 1;
+        return `
         <div class="discussion-thread ${isThread ? 'has-replies' : ''}">
-          ${disc.notes.map((note, idx) => `
+          ${disc.notes
+            .map(
+              (note, idx) => `
             <div class="discussion-note ${idx > 0 ? 'reply' : 'root'}">
               <div class="note-avatar" title="${escapeHtml(note.author_name)}">
-                ${note.author_avatar_url
-                  ? `<img src="${escapeHtml(note.author_avatar_url)}" alt="" />`
-                  : `<span>${escapeHtml(note.author_name.charAt(0).toUpperCase())}</span>`}
+                ${
+                  note.author_avatar_url
+                    ? `<img src="${escapeHtml(note.author_avatar_url)}" alt="" />`
+                    : `<span>${escapeHtml(note.author_name.charAt(0).toUpperCase())}</span>`
+                }
               </div>
               <div class="note-content">
                 <div class="note-header">
@@ -3118,16 +3517,21 @@ async function loadDiscussions(iid: number, container: HTMLDivElement): Promise<
                 <div class="note-body">${escapeHtml(note.body)}</div>
               </div>
             </div>
-          `).join('')}
+          `,
+            )
+            .join('')}
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('401') || msg.includes('invalid_token') || msg.includes('revoked')) {
-      container.innerHTML = '<div class="empty-state">Token 已失效或被撤銷，請重新產生 Personal Access Token。</div>';
+      container.innerHTML =
+        '<div class="empty-state">Token 已失效或被撤銷，請重新產生 Personal Access Token。</div>';
     } else {
-      container.innerHTML = '<div class="empty-state">無法載入討論（請確認 GitLab 連線設定）。</div>';
+      container.innerHTML =
+        '<div class="empty-state">無法載入討論（請確認 GitLab 連線設定）。</div>';
     }
   }
 }
@@ -3235,7 +3639,7 @@ function initChat(): void {
 }
 
 function wireSuggestionBtns(container: HTMLElement): void {
-  container.querySelectorAll('.chat-suggestion-btn').forEach(btn => {
+  container.querySelectorAll('.chat-suggestion-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const input = document.getElementById('chat-input') as HTMLInputElement;
       if (input) {
@@ -3283,7 +3687,11 @@ async function sendChatMessage(input: HTMLInputElement): Promise<void> {
   } catch (err: any) {
     typingEl.remove();
     const errMsg = err?.message || '未知錯誤';
-    appendChatMsg(msgs, 'assistant', `<span style="color:var(--red-400)">發生錯誤：${escapeHtml(errMsg)}</span>`);
+    appendChatMsg(
+      msgs,
+      'assistant',
+      `<span style="color:var(--red-400)">發生錯誤：${escapeHtml(errMsg)}</span>`,
+    );
   } finally {
     sendBtn.disabled = false;
     input.focus();
@@ -3297,10 +3705,10 @@ function appendChatMsg(container: HTMLElement, role: string, html: string, model
   el.innerHTML = `<div class="chat-msg-content">${html}</div>${metaHtml}`;
 
   // Wire issue ref clicks
-  el.querySelectorAll('.issue-ref').forEach(ref => {
+  el.querySelectorAll('.issue-ref').forEach((ref) => {
     ref.addEventListener('click', () => {
       const iid = Number((ref as HTMLElement).dataset.iid);
-      const issue = state.allIssues.find(i => i.iid === iid);
+      const issue = state.allIssues.find((i) => i.iid === iid);
       if (issue) openIssueDetail(issue);
     });
   });
@@ -3324,7 +3732,7 @@ function formatChatAnswer(text: string): string {
 
   // Convert #123 issue references to clickable links
   html = html.replace(/#(\d+)/g, (_match, iid) => {
-    const issue = state.allIssues.find(i => i.iid === Number(iid));
+    const issue = state.allIssues.find((i) => i.iid === Number(iid));
     if (issue) {
       return `<button type="button" class="issue-ref" data-iid="${iid}" title="查看 ${escapeHtml(issue.title)}">#${iid}</button>`;
     }
@@ -3342,7 +3750,11 @@ function wireEvents(): void {
   syncTimelineRangeControls();
   initChat();
 
-  const bind = <T extends HTMLElement>(id: string, eventName: string, listener: EventListenerOrEventListenerObject): T | null => {
+  const bind = <T extends HTMLElement>(
+    id: string,
+    eventName: string,
+    listener: EventListenerOrEventListenerObject,
+  ): T | null => {
     const element = getById<T>(id);
     if (!element) {
       console.warn(`Missing element during event binding: ${id}`);
@@ -3387,7 +3799,9 @@ function wireEvents(): void {
   bind<HTMLButtonElement>('btn-save-config', 'click', () => saveConfig().catch(handleError));
   bind<HTMLButtonElement>('btn-sync-now', 'click', () => syncNow().catch(handleError));
   bind<HTMLButtonElement>('btn-refresh-dashboard', 'click', () => syncNow().catch(handleError));
-  bind<HTMLButtonElement>('btn-generate-report', 'click', () => generateReport().catch(handleError));
+  bind<HTMLButtonElement>('btn-generate-report', 'click', () =>
+    generateReport().catch(handleError),
+  );
   bind<HTMLButtonElement>('btn-open-report', 'click', () => openLatestReport().catch(handleError));
   bind<HTMLButtonElement>('btn-export-pdf', 'click', () => exportReportPdf().catch(handleError));
 
@@ -3397,16 +3811,24 @@ function wireEvents(): void {
   // Burndown milestone selector
   bind<HTMLSelectElement>('burndown-milestone-select', 'change', () => {
     if (!state.analytics) return;
-    const ms = state.analytics.burndown.find(b => b.milestone === byId<HTMLSelectElement>('burndown-milestone-select').value);
+    const ms = state.analytics.burndown.find(
+      (b) => b.milestone === byId<HTMLSelectElement>('burndown-milestone-select').value,
+    );
     if (ms) renderBurndownChartSafe(ms);
   });
 
   // Gantt filters
   bind<HTMLSelectElement>('gantt-quick-view', 'change', () => scheduleGanttRender(state.allIssues));
   bind<HTMLSelectElement>('gantt-group-by', 'change', () => scheduleGanttRender(state.allIssues));
-  bind<HTMLSelectElement>('gantt-milestone-filter', 'change', () => scheduleGanttRender(state.allIssues));
-  bind<HTMLSelectElement>('gantt-assignee-filter', 'change', () => scheduleGanttRender(state.allIssues));
-  bind<HTMLSelectElement>('gantt-state-filter', 'change', () => scheduleGanttRender(state.allIssues));
+  bind<HTMLSelectElement>('gantt-milestone-filter', 'change', () =>
+    scheduleGanttRender(state.allIssues),
+  );
+  bind<HTMLSelectElement>('gantt-assignee-filter', 'change', () =>
+    scheduleGanttRender(state.allIssues),
+  );
+  bind<HTMLSelectElement>('gantt-state-filter', 'change', () =>
+    scheduleGanttRender(state.allIssues),
+  );
   bind<HTMLSelectElement>('gantt-range-mode', 'change', () => {
     syncTimelineRangeControls();
     scheduleGanttRender(state.allIssues);
@@ -3439,7 +3861,7 @@ function wireEvents(): void {
   bind<HTMLInputElement>('table-date-end', 'change', () => renderSpreadsheet());
 
   // Sort headers
-  document.querySelectorAll('.spreadsheet-wrap th[data-sort]').forEach(th => {
+  document.querySelectorAll('.spreadsheet-wrap th[data-sort]').forEach((th) => {
     th.addEventListener('click', () => {
       const key = (th as HTMLElement).dataset.sort!;
       if (state.tableSort.key === key) {
@@ -3466,10 +3888,12 @@ function wireEvents(): void {
 
   // Clickable issue cards → open detail panel
   document.addEventListener('click', (e) => {
-    const card = (e.target as HTMLElement).closest('.issue-card[data-iid], .alert-item[data-iid]') as HTMLElement | null;
+    const card = (e.target as HTMLElement).closest(
+      '.issue-card[data-iid], .alert-item[data-iid]',
+    ) as HTMLElement | null;
     if (card && card.dataset.iid && !(e.target as HTMLElement).closest('a')) {
       const iid = Number(card.dataset.iid);
-      const issue = state.allIssues.find(i => i.iid === iid);
+      const issue = state.allIssues.find((i) => i.iid === iid);
       if (issue) openIssueDetail(issue);
     }
   });
@@ -3479,7 +3903,7 @@ function wireEvents(): void {
     const row = (e.target as HTMLElement).closest('tr[data-iid]') as HTMLElement | null;
     if (row && row.dataset.iid && !(e.target as HTMLElement).closest('a')) {
       const iid = Number(row.dataset.iid);
-      const issue = state.allIssues.find(i => i.iid === iid);
+      const issue = state.allIssues.find((i) => i.iid === iid);
       if (issue) openIssueDetail(issue);
     }
   });

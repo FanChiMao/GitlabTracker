@@ -1,0 +1,9 @@
+node_modules
+dist
+release
+.github
+.venv
+backend/build
+backend/dist
+backend/data
+backend/core/__pycache__

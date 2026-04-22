@@ -14,9 +14,5 @@
     "forceConsistentCasingInFileNames": true,
     "ignoreDeprecations": "5.0"
   },
-  "include": [
-    "src/**/*.ts",
-    "src/**/*.d.ts",
-    "renderer/**/*.ts"
-  ]
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "renderer/**/*.ts"]
 }

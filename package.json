@@ -8,6 +8,8 @@
   "scripts": {
     "build:ts": "tsc -p tsconfig.json",
     "dev": "npm run build:ts && electron .",
+    "format": "prettier --write \"*.{json,md}\" \"src/**/*.ts\" \"renderer/**/*.{ts,html,css}\"",
+    "format:check": "prettier --check \"*.{json,md}\" \"src/**/*.ts\" \"renderer/**/*.{ts,html,css}\"",
     "pack:backend": "node -e \"const{execSync}=require('child_process');execSync('.venv\\\\Scripts\\\\pyinstaller --noconfirm --onedir --name gitlab-tracker-backend --hidden-import uvicorn.logging --hidden-import uvicorn.lifespan --hidden-import uvicorn.lifespan.on --hidden-import uvicorn.protocols --hidden-import uvicorn.protocols.http --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.http.h11_impl --hidden-import uvicorn.protocols.http.httptools_impl --hidden-import uvicorn.protocols.websockets --hidden-import uvicorn.protocols.websockets.auto --hidden-import uvicorn.protocols.websockets.wsproto_impl --hidden-import uvicorn.loops --hidden-import uvicorn.loops.auto --hidden-import uvicorn.loops.asyncio backend/app.py --distpath backend/dist --workpath backend/build --specpath backend',{stdio:'inherit'})\"",
     "pack": "npm run build:ts && npm run pack:backend && electron-builder --dir",
     "dist": "npm run build:ts && npm run pack:backend && electron-builder"
@@ -16,6 +18,7 @@
     "electron": "^41.2.2",
     "electron-builder": "^26.8.1",
     "png2icons": "^2.0.1",
+    "prettier": "^3.8.3",
     "typescript": "^5.8.3"
   },
   "build": {
@@ -43,6 +46,9 @@
       "target": [
         "nsis"
       ]
+    },
+    "nsis": {
+      "deleteAppDataOnUninstall": true
     }
   },
   "dependencies": {

@@ -34,7 +34,11 @@ function loadExternalLinkPreferences(): ExternalLinkPreferences {
 
     const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Partial<ExternalLinkPreferences>;
     const preferredBrowser = raw.preferredBrowser;
-    if (preferredBrowser === 'chrome' || preferredBrowser === 'edge' || preferredBrowser === 'default') {
+    if (
+      preferredBrowser === 'chrome' ||
+      preferredBrowser === 'edge' ||
+      preferredBrowser === 'default'
+    ) {
       return { preferredBrowser };
     }
   } catch (error) {
@@ -62,17 +66,18 @@ function findBrowserExecutable(choice: Exclude<ExternalBrowserChoice, 'default'>
   const programFilesX86 = process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)';
   const localAppData = process.env['LOCALAPPDATA'] || '';
 
-  const candidates = choice === 'chrome'
-    ? [
-        path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      ]
-    : [
-        path.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-        path.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-        path.join(localAppData, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      ];
+  const candidates =
+    choice === 'chrome'
+      ? [
+          path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        ]
+      : [
+          path.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+          path.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+          path.join(localAppData, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        ];
 
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) ?? null;
 }
@@ -96,7 +101,9 @@ async function launchExternalUrl(url: string, choice: ExternalBrowserChoice): Pr
   return true;
 }
 
-async function promptForExternalBrowser(url: string): Promise<{ choice: ExternalBrowserChoice | null; rememberChoice: boolean }> {
+async function promptForExternalBrowser(
+  url: string,
+): Promise<{ choice: ExternalBrowserChoice | null; rememberChoice: boolean }> {
   let detail = url;
   try {
     const parsedUrl = new URL(url);
@@ -284,30 +291,39 @@ function createWindow(): void {
     }
   });
 
-  mainWindow.webContents.on('did-fail-load', (_event: Electron.Event, code: number, desc: string, validatedURL: string) => {
-    console.error('[renderer] did-fail-load', { code, desc, validatedURL });
-  });
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (_event: Electron.Event, code: number, desc: string, validatedURL: string) => {
+      console.error('[renderer] did-fail-load', { code, desc, validatedURL });
+    },
+  );
 
-  mainWindow.webContents.on('zoom-changed', (event: Electron.Event, zoomDirection: 'in' | 'out') => {
-    event.preventDefault();
-    changeWindowZoom(mainWindow!, zoomDirection);
-  });
+  mainWindow.webContents.on(
+    'zoom-changed',
+    (event: Electron.Event, zoomDirection: 'in' | 'out') => {
+      event.preventDefault();
+      changeWindowZoom(mainWindow!, zoomDirection);
+    },
+  );
 
-  mainWindow.webContents.on('before-input-event', (event: Electron.Event, input: Electron.Input) => {
-    const zoomAction = getZoomAction(input);
-    if (!zoomAction) {
-      return;
-    }
+  mainWindow.webContents.on(
+    'before-input-event',
+    (event: Electron.Event, input: Electron.Input) => {
+      const zoomAction = getZoomAction(input);
+      if (!zoomAction) {
+        return;
+      }
 
-    event.preventDefault();
+      event.preventDefault();
 
-    if (zoomAction === 'reset') {
-      setWindowZoom(mainWindow!, DEFAULT_ZOOM_FACTOR);
-      return;
-    }
+      if (zoomAction === 'reset') {
+        setWindowZoom(mainWindow!, DEFAULT_ZOOM_FACTOR);
+        return;
+      }
 
-    changeWindowZoom(mainWindow!, zoomAction);
-  });
+      changeWindowZoom(mainWindow!, zoomAction);
+    },
+  );
 
   if (!app.isPackaged) {
     mainWindow.webContents.openDevTools();
@@ -351,7 +367,7 @@ function startBackend(): Promise<void> {
       root,
       'dist',
       'gitlab-tracker-backend',
-      process.platform === 'win32' ? 'gitlab-tracker-backend.exe' : 'gitlab-tracker-backend'
+      process.platform === 'win32' ? 'gitlab-tracker-backend.exe' : 'gitlab-tracker-backend',
     );
 
     let command = 'python';
@@ -391,17 +407,24 @@ function startBackend(): Promise<void> {
     // Create blank default config if none exists
     const cfgPath = path.join(dataDir, 'config.json');
     if (!fs.existsSync(cfgPath)) {
-      fs.writeFileSync(cfgPath, JSON.stringify({
-        gitlab_url: '',
-        token: '',
-        project_ref: '',
-        project_ref_history: [],
-        import_file: '',
-        enable_daily_sync: true,
-        daily_sync_time: '09:00',
-        enable_weekly_report: true,
-        weekly_report_time: '17:30'
-      }, null, 2));
+      fs.writeFileSync(
+        cfgPath,
+        JSON.stringify(
+          {
+            gitlab_url: '',
+            token: '',
+            project_ref: '',
+            project_ref_history: [],
+            import_file: '',
+            enable_daily_sync: true,
+            daily_sync_time: '09:00',
+            enable_weekly_report: true,
+            weekly_report_time: '17:30',
+          },
+          null,
+          2,
+        ),
+      );
     }
 
     backendProcess = spawn(command, args, {
@@ -490,7 +513,7 @@ ipcMain.handle('report:exportPdf', async (_event, htmlContent: string) => {
   const win = new BrowserWindow({ show: false, width: 900, height: 1200 });
   await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent));
   // Wait for content to render
-  await new Promise(resolve => setTimeout(resolve, 800));
+  await new Promise((resolve) => setTimeout(resolve, 800));
   const pdfData = await win.webContents.printToPDF({
     printBackground: true,
     pageSize: 'A4',
