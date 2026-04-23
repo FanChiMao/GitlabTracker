@@ -1,7 +1,7 @@
 {
   "name": "gitlab-tracker",
   "version": "1.0.0",
-  "description": "Electron + TypeScript + Python app for GitLab issue tracking and weekly reporting.",
+  "description": "GitLab issue tracking and weekly reporting.",
   "main": "dist/src/main.js",
   "author": "OpenAI",
   "license": "MIT",
