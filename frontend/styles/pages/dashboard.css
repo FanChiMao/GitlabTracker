@@ -1,0 +1,313 @@
+/* ── Summary grid ── */
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.metric-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  transition: all var(--duration-normal) var(--ease-out);
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--glass-highlight), var(--glass-inner-glow), var(--shadow-sm);
+}
+.metric-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--glass-border);
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.5;
+  transition: opacity var(--duration-normal);
+}
+.metric-card::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at 30% 20%, rgba(124, 156, 255, 0.06), transparent 50%);
+  pointer-events: none;
+  transition: opacity var(--duration-normal);
+  opacity: 0;
+}
+.metric-card:hover {
+  border-color: var(--border-glass-highlight);
+  transform: translateY(-2px);
+  box-shadow:
+    var(--glass-highlight),
+    inset 0 0 40px rgba(124, 156, 255, 0.06),
+    var(--shadow-md);
+}
+.metric-card:hover::before {
+  opacity: 0.8;
+}
+.metric-card:hover::after {
+  opacity: 1;
+}
+.metric-card h3 {
+  margin: 0 0 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  position: relative;
+  z-index: 1;
+}
+.metric-card strong {
+  font-size: 28px;
+  font-weight: 700;
+  position: relative;
+  z-index: 1;
+  background: linear-gradient(135deg, var(--text-primary), var(--blue-400));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Content grid ── */
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.large-panel {
+  min-height: 280px;
+  max-height: 520px;
+  display: flex;
+  flex-direction: column;
+}
+.large-panel > .table-wrap,
+.large-panel > .card-list,
+.large-panel > .summary-list,
+.large-panel > .alert-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 400px;
+}
+
+/* ── Summary list ── */
+.summary-list {
+  display: grid;
+  gap: 6px;
+}
+.summary-item {
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.025);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  transition: all var(--duration-fast) var(--ease-out);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.summary-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-glass-highlight);
+}
+.summary-item span {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.summary-item strong {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* ── Issue card (Glass) ── */
+.issue-card {
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.025);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: all var(--duration-normal) var(--ease-out);
+  position: relative;
+}
+.issue-card:hover {
+  border-color: var(--border-glass-highlight);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 4px 20px rgba(0, 0, 0, 0.15);
+  transform: translateY(-1px);
+}
+.issue-card h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.issue-card h4 a.issue-link {
+  color: inherit;
+  text-decoration: none;
+  transition: color var(--duration-fast);
+}
+.issue-card h4 a.issue-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.issue-card p {
+  margin: 4px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.signal-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.signal-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+.signal-pill.blocked {
+  color: var(--amber-300);
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+.card-list {
+  display: grid;
+  gap: 8px;
+}
+
+/* ── Tags (Glass Pill) ── */
+.tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.tag {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(124, 156, 255, 0.08);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: var(--blue-400);
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid rgba(124, 156, 255, 0.12);
+}
+
+/* ── Table wrap (Glass) ── */
+.table-wrap {
+  overflow: auto;
+  border-radius: var(--radius-sm);
+}
+.table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.table-wrap th {
+  text-align: left;
+  padding: 10px 10px;
+  border-bottom: 1px solid var(--border-glass-highlight);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.table-wrap td {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13px;
+  vertical-align: middle;
+}
+.table-wrap tbody tr {
+  transition: background var(--duration-fast);
+}
+.table-wrap tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.empty-state {
+  color: var(--text-muted);
+  padding: 20px 0;
+  text-align: center;
+  font-size: 13px;
+}
+
+/* ── State badges (Glass Pill) ── */
+.state-badge {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid transparent;
+}
+.state-badge.opened {
+  background: rgba(94, 210, 160, 0.1);
+  border-color: rgba(94, 210, 160, 0.18);
+  color: var(--green-400);
+}
+.state-badge.closed {
+  background: rgba(124, 156, 255, 0.08);
+  border-color: rgba(124, 156, 255, 0.15);
+  color: var(--blue-400);
+}
+
+.disc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.disc-badge.new {
+  color: var(--accent);
+  font-weight: 600;
+  animation: disc-pulse 1.5s ease-in-out 3;
+}
+.disc-badge.none {
+  opacity: 0.35;
+}
+@keyframes disc-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}

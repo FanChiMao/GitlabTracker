@@ -1,0 +1,365 @@
+<section id="view-dashboard" class="workspace-view active">
+  <section class="hero">
+    <div>
+      <div class="view-eyebrow">Views / Dashboard</div>
+      <h2 class="view-title">Dashboard</h2>
+      <p class="view-subtitle">儀表板、分析、時程表與 Issue 表格功能。</p>
+    </div>
+
+    <div class="hero-actions">
+      <nav class="tab-bar" role="tablist">
+        <button class="tab-btn active" data-tab="dashboard" role="tab" aria-selected="true">
+          總覽
+        </button>
+        <button class="tab-btn" data-tab="analytics" role="tab" aria-selected="false">分析</button>
+        <button class="tab-btn" data-tab="timeline" role="tab" aria-selected="false">時程表</button>
+        <button class="tab-btn" data-tab="table" role="tab" aria-selected="false">
+          Issue 表格
+        </button>
+      </nav>
+      <button id="btn-refresh-dashboard" class="primary-btn">立即同步</button>
+    </div>
+  </section>
+
+  <div id="tab-dashboard" class="tab-content active" role="tabpanel">
+    <section class="summary-grid" id="summary-grid">
+      <article class="metric-card">
+        <h3>本週新增</h3>
+        <strong id="metric-new">0</strong>
+      </article>
+      <article class="metric-card">
+        <h3>本週更新</h3>
+        <strong id="metric-updated">0</strong>
+      </article>
+      <article class="metric-card">
+        <h3>開啟中 Issue</h3>
+        <strong id="metric-opened">0</strong>
+      </article>
+      <article class="metric-card">
+        <h3>風險議題</h3>
+        <strong id="metric-risk">0</strong>
+      </article>
+    </section>
+
+    <section class="content-grid">
+      <section class="panel large-panel">
+        <div class="section-title-row">
+          <h2>1. 週摘要</h2>
+          <span class="hint">最近 7 天整體變化</span>
+        </div>
+        <div id="weekly-summary" class="summary-list"></div>
+      </section>
+
+      <section class="panel large-panel">
+        <div class="section-title-row">
+          <h2>2. 最近更新的 Issue</h2>
+          <label class="inline-control">
+            近
+            <input
+              id="recent-hours"
+              type="number"
+              min="1"
+              max="720"
+              value="6"
+              style="width: 60px; text-align: center"
+            />
+            小時
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>IID</th>
+                <th>模組</th>
+                <th>標題</th>
+                <th>Assignee</th>
+                <th>狀態</th>
+                <th>Milestone</th>
+                <th>更新時間</th>
+              </tr>
+            </thead>
+            <tbody id="table-recent-issues"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel large-panel">
+        <div class="section-title-row">
+          <h2>3. 本週新增 Issue</h2>
+          <span class="hint">created_at 最近 7 天</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>IID</th>
+                <th>模組</th>
+                <th>標題</th>
+                <th>Assignee</th>
+                <th>Milestone</th>
+                <th>狀態</th>
+              </tr>
+            </thead>
+            <tbody id="table-new-issues"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel large-panel">
+        <div class="section-title-row">
+          <h2>4. 重點追蹤</h2>
+          <span class="hint">近期有更新且值得關注的議題</span>
+        </div>
+        <div id="focus-progress" class="card-list"></div>
+      </section>
+
+      <section class="panel large-panel">
+        <div class="section-title-row">
+          <h2>5. 風險與阻塞</h2>
+          <span class="hint">未指派、即將到期、長時間未更新</span>
+        </div>
+        <div id="risk-blockers" class="card-list"></div>
+      </section>
+
+      <section class="panel large-panel">
+        <div class="section-title-row">
+          <h2>6. 到期提醒</h2>
+          <span class="hint">紅色=逾期、黃色=3 天內、橘色=7 天內</span>
+        </div>
+        <div id="overdue-alerts" class="alert-list"></div>
+      </section>
+    </section>
+  </div>
+
+  <div id="tab-analytics" class="tab-content" role="tabpanel">
+    <div class="analytics-grid">
+      <section class="panel analytics-panel">
+        <div class="section-title-row">
+          <h2>燃盡圖</h2>
+          <label class="inline-control">
+            Milestone
+            <select id="burndown-milestone-select">
+              <option value="">請選擇 Milestone</option>
+            </select>
+          </label>
+        </div>
+        <div id="burndown-chart" class="chart-container">
+          <div class="empty-state">請先同步資料並選擇 Milestone。</div>
+        </div>
+        <div id="burndown-stats" class="burndown-stats"></div>
+      </section>
+
+      <section class="panel analytics-panel">
+        <div class="section-title-row">
+          <h2>工作量分布</h2>
+          <span class="hint">依 Assignee 看開啟、完成與到期風險</span>
+        </div>
+        <div id="workload-heatmap" class="workload-container">
+          <div class="empty-state">請先同步資料。</div>
+        </div>
+      </section>
+
+      <section class="panel analytics-panel">
+        <div class="section-title-row">
+          <h2>Label 分布</h2>
+          <span class="hint">觀察 Bug / Feature / Improvement 等類型</span>
+        </div>
+        <div id="label-distribution" class="label-dist-container">
+          <div class="empty-state">請先同步資料。</div>
+        </div>
+      </section>
+
+      <section class="panel analytics-panel">
+        <div class="section-title-row">
+          <h2>Milestone 進度</h2>
+          <span class="hint">依 Milestone 檢視完成比例</span>
+        </div>
+        <div id="milestone-progress" class="milestone-progress-container">
+          <div class="empty-state">請先同步資料。</div>
+        </div>
+      </section>
+
+      <section class="panel analytics-panel analytics-panel-wide">
+        <div class="section-title-row">
+          <h2>Issue 生命週期</h2>
+          <span class="hint">MTTR、分布與最近 throughput</span>
+        </div>
+        <div id="lifecycle-stats" class="lifecycle-container">
+          <div class="empty-state">請先同步資料。</div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="tab-timeline" class="tab-content" role="tabpanel">
+    <div class="timeline-controls">
+      <div class="timeline-main-controls">
+        <label class="timeline-control">
+          快速篩選
+          <select id="gantt-quick-view">
+            <option value="custom">自訂</option>
+            <option value="overdue">逾期</option>
+            <option value="due_soon">即將到期</option>
+            <option value="unassigned">未指派</option>
+            <option value="no_due_date">無到期日</option>
+            <option value="active_milestones">Active Milestone</option>
+          </select>
+        </label>
+        <label class="timeline-control">
+          分組
+          <select id="gantt-group-by">
+            <option value="none">不分組</option>
+            <option value="milestone">Milestone</option>
+            <option value="assignee" selected>Assignee</option>
+            <option value="module">Module</option>
+          </select>
+        </label>
+        <label class="timeline-control">
+          期間
+          <div class="timeline-period-nav">
+            <button id="gantt-month-prev" class="month-nav-btn" title="上一期">&lsaquo;</button>
+            <input type="month" id="gantt-month" />
+            <input type="week" id="gantt-week" hidden />
+            <button id="gantt-month-next" class="month-nav-btn" title="下一期">&rsaquo;</button>
+          </div>
+        </label>
+        <label class="timeline-control">
+          顯示方式
+          <select id="gantt-view-mode">
+            <option value="gantt" selected>Gantt</option>
+            <option value="calendar">Calendar</option>
+          </select>
+        </label>
+        <label class="timeline-control">
+          範圍
+          <select id="gantt-range-mode">
+            <option value="month" selected>月</option>
+            <option value="week">週</option>
+          </select>
+        </label>
+      </div>
+      <label class="inline-control">
+        Milestone
+        <select id="gantt-milestone-filter">
+          <option value="">全部</option>
+        </select>
+      </label>
+      <label class="inline-control">
+        Assignee
+        <select id="gantt-assignee-filter">
+          <option value="">全部</option>
+        </select>
+      </label>
+      <label class="inline-control">
+        狀態
+        <select id="gantt-state-filter">
+          <option value="">全部</option>
+          <option value="opened" selected>開啟中</option>
+          <option value="closed">已關閉</option>
+        </select>
+      </label>
+      <div class="timeline-legend">
+        <span
+          ><span class="timeline-legend-dot" style="background: var(--green-400)"></span
+          >開啟中</span
+        >
+        <span><span class="timeline-legend-dot" style="background: #60a5fa"></span>進行中</span>
+        <span
+          ><span class="timeline-legend-dot" style="background: var(--red-400)"></span>逾期</span
+        >
+        <span>
+          <span
+            class="timeline-legend-dot"
+            style="background: var(--blue-400); opacity: 0.6"
+          ></span>
+          已關閉
+        </span>
+      </div>
+    </div>
+    <div id="gantt-summary" class="timeline-summary"></div>
+    <div id="gantt-chart" class="gantt-container">
+      <div class="empty-state">等待資料載入中...</div>
+    </div>
+    <div id="calendar-chart" class="calendar-container" style="display: none">
+      <div class="empty-state">等待資料載入中...</div>
+    </div>
+  </div>
+
+  <div id="tab-table" class="tab-content" role="tabpanel">
+    <div class="spreadsheet-toolbar">
+      <input
+        type="text"
+        id="table-search"
+        placeholder="搜尋 Issue、標題、ID、Label 或 Assignee..."
+      />
+      <label class="inline-control">
+        狀態
+        <select id="table-state-filter">
+          <option value="">全部</option>
+          <option value="opened" selected>開啟中</option>
+          <option value="closed">已關閉</option>
+        </select>
+      </label>
+      <label class="inline-control">
+        Milestone
+        <select id="table-milestone-filter">
+          <option value="">全部</option>
+        </select>
+      </label>
+      <label class="inline-control">
+        Label
+        <select id="table-label-filter">
+          <option value="">全部</option>
+        </select>
+      </label>
+      <label class="inline-control">
+        建立起
+        <input type="date" id="table-date-start" />
+      </label>
+      <label class="inline-control">
+        建立迄
+        <input type="date" id="table-date-end" />
+      </label>
+      <span id="table-info" class="spreadsheet-info"></span>
+    </div>
+    <div class="spreadsheet-wrap">
+      <div class="spreadsheet-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th class="row-num-header">#</th>
+              <th class="col-iid" data-sort="iid">IID <span class="sort-arrow">&#9650;</span></th>
+              <th class="col-state" data-sort="state">
+                狀態 <span class="sort-arrow">&#9650;</span>
+              </th>
+              <th class="col-module" data-sort="module">
+                模組 <span class="sort-arrow">&#9650;</span>
+              </th>
+              <th class="col-title" data-sort="title">
+                標題 <span class="sort-arrow">&#9650;</span>
+              </th>
+              <th class="col-assignee" data-sort="assignees">
+                Assignee <span class="sort-arrow">&#9650;</span>
+              </th>
+              <th class="col-milestone" data-sort="milestone">
+                Milestone <span class="sort-arrow">&#9650;</span>
+              </th>
+              <th class="col-labels">Labels</th>
+              <th class="col-created" data-sort="created_at">
+                建立 <span class="sort-arrow">&#9650;</span>
+              </th>
+              <th class="col-updated" data-sort="updated_at">
+                更新 <span class="sort-arrow">&#9650;</span>
+              </th>
+              <th class="col-due" data-sort="due_date">
+                到期 <span class="sort-arrow">&#9650;</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="table-all-issues"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>

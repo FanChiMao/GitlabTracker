@@ -1,0 +1,76 @@
+<section id="view-connections" class="workspace-view">
+  <section class="page-hero">
+    <div>
+      <div class="view-eyebrow">Tools / Connections</div>
+      <h2 class="view-title">連線設定</h2>
+      <p class="view-subtitle">集中管理連線資訊。</p>
+    </div>
+  </section>
+
+  <div class="tool-grid">
+    <section class="panel config-panel">
+      <div class="section-title-row">
+        <h2>GitLab 與 AI</h2>
+        <button id="btn-load-config" class="ghost-btn">重新載入</button>
+      </div>
+
+      <label>GitLab Base URL</label>
+      <input id="gitlab-url" placeholder="http://gitlab.company.local" />
+
+      <label>Private Token</label>
+      <input id="gitlab-token" type="password" placeholder="glpat-..." />
+      <small class="field-hint">
+        可從
+        <a id="token-hint-link" href="#">GitLab Personal Access Tokens</a> 產生，至少需要
+        <code>read_api</code> 權限。
+      </small>
+
+      <label>Project Path / ID</label>
+      <input
+        id="project-ref"
+        list="project-ref-history-list"
+        placeholder="products/aisvisionplatform/frontend 或 592"
+        autocomplete="off"
+      />
+      <datalist id="project-ref-history-list"></datalist>
+      <small class="field-hint">支援輸入 project path 或 project ID，會保留最近使用過的值。</small>
+
+      <label>Import JSON</label>
+      <div class="file-row">
+        <input id="import-file" placeholder="可選：從本機 JSON 匯入 Issue 資料" />
+        <button id="btn-pick-file" type="button" class="ghost-btn">選檔</button>
+      </div>
+
+      <label>Gemini API Key</label>
+      <input id="gemini-api-key" type="password" placeholder="AIza..." />
+      <small class="field-hint">
+        可從 <a id="gemini-hint-link" href="#">Google AI Studio</a> 取得 API Key。
+      </small>
+
+      <div class="button-row">
+        <button id="btn-save-config" class="primary-btn">儲存設定</button>
+        <button id="btn-sync-now" class="secondary-btn">立即同步</button>
+      </div>
+    </section>
+
+    <section class="panel info-panel">
+      <div class="section-title-row">
+        <h2>說明</h2>
+      </div>
+      <div class="info-stack">
+        <div class="info-card">
+          <strong>Dashboard</strong>
+          <p>同步後會更新快取 Issue、Dashboard、Timeline 與分析資料。</p>
+        </div>
+        <div class="info-card">
+          <strong>Issue 整理</strong>
+          <p>會直接使用這裡的 GitLab Token 與 Gemini API Key，不需要另外重複輸入。</p>
+        </div>
+        <div class="info-card">
+          <strong>Import JSON</strong>
+          <p>如果你想離線檢視 Dashboard，可用本機 JSON 取代即時 GitLab API。</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</section>

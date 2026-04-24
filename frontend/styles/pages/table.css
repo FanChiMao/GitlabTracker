@@ -1,0 +1,191 @@
+/* ══════════════════════════════════════════════
+   TAB 3: TABLE (Glass Excel)
+   ══════════════════════════════════════════════ */
+.spreadsheet-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.spreadsheet-toolbar input[type='text'] {
+  min-width: 240px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.spreadsheet-toolbar select {
+  min-width: 140px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+}
+.spreadsheet-info {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.spreadsheet-wrap {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--glass-highlight), var(--shadow-md);
+}
+.spreadsheet-scroll {
+  overflow: auto;
+  max-height: 640px;
+}
+.spreadsheet-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  min-width: 1100px;
+}
+.spreadsheet-wrap thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-sticky-header);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.spreadsheet-wrap th {
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border-glass-highlight);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  position: relative;
+  transition: all var(--duration-fast);
+}
+.spreadsheet-wrap th:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+}
+.spreadsheet-wrap th.sorted {
+  color: var(--accent);
+}
+.spreadsheet-wrap th .sort-arrow {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.5;
+}
+.spreadsheet-wrap th.sorted .sort-arrow {
+  opacity: 1;
+}
+
+/* Column resize handle */
+.col-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 3;
+  background: transparent;
+  transition: background var(--duration-fast);
+}
+.col-resize-handle:hover,
+.col-resize-handle:active {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+.spreadsheet-wrap td {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spreadsheet-wrap tbody tr {
+  transition: background var(--duration-fast);
+  cursor: pointer;
+}
+.spreadsheet-wrap tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.spreadsheet-wrap tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.008);
+}
+.spreadsheet-wrap tbody tr:nth-child(even):hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Column widths */
+.col-iid {
+  width: 60px;
+}
+.col-state {
+  width: 70px;
+}
+.col-module {
+  width: 100px;
+}
+.col-title {
+  width: auto;
+  min-width: 200px;
+}
+.col-assignee {
+  width: 120px;
+}
+.col-milestone {
+  width: 120px;
+}
+.col-labels {
+  width: 160px;
+}
+.col-created {
+  width: 100px;
+}
+.col-updated {
+  width: 100px;
+}
+.col-due {
+  width: 100px;
+}
+
+/* Cell labels */
+.cell-labels {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.cell-labels .tag {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+/* Row number */
+.spreadsheet-wrap td.row-num {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+  width: 40px;
+  border-right: 1px solid var(--border-glass-highlight);
+  background: var(--bg-sticky-rownum);
+}
+.spreadsheet-wrap th.row-num-header {
+  width: 40px;
+  border-right: 1px solid var(--border-glass-highlight);
+  cursor: default;
+}
+.spreadsheet-wrap th.row-num-header:hover {
+  background: transparent;
+}
