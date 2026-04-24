@@ -1,0 +1,51 @@
+# .github/workflows/ci.yml
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  format-and-build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python -m pip install --upgrade pip
+          .\.venv\Scripts\pip install -r backend\requirements.txt
+          .\.venv\Scripts\pip install pyinstaller
+
+      - name: Check format
+        run: npm run format:check
+
+      - name: Build TypeScript
+        run: npm run build:ts
+
+      - name: Build Electron app
+        run: npm run dist
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitlab-tracker-release
+          path: release/
