@@ -1,0 +1,124 @@
+<div id="issue-detail-overlay" class="detail-overlay">
+  <div id="issue-detail-panel" class="detail-panel">
+    <div class="detail-header">
+      <div class="detail-header-info">
+        <span id="detail-iid" class="detail-iid"></span>
+        <span id="detail-state" class="state-badge"></span>
+      </div>
+      <button id="detail-close" class="ghost-btn detail-close-btn" title="關閉">×</button>
+    </div>
+    <h2 id="detail-title" class="detail-title"></h2>
+    <div class="detail-meta">
+      <div class="detail-meta-row">
+        <span class="detail-meta-label">Assignee</span
+        ><span id="detail-assignees" class="detail-meta-value"></span>
+      </div>
+      <div class="detail-meta-row">
+        <span class="detail-meta-label">Milestone</span
+        ><span id="detail-milestone" class="detail-meta-value"></span>
+      </div>
+      <div class="detail-meta-row">
+        <span class="detail-meta-label">模組</span
+        ><span id="detail-module" class="detail-meta-value"></span>
+      </div>
+      <div class="detail-meta-row">
+        <span class="detail-meta-label">建立時間</span
+        ><span id="detail-created" class="detail-meta-value"></span>
+      </div>
+      <div class="detail-meta-row">
+        <span class="detail-meta-label">更新時間</span
+        ><span id="detail-updated" class="detail-meta-value"></span>
+      </div>
+      <div class="detail-meta-row">
+        <span class="detail-meta-label">到期日</span
+        ><span id="detail-due" class="detail-meta-value"></span>
+      </div>
+    </div>
+    <div id="detail-labels" class="detail-labels"></div>
+    <div id="detail-delivery" class="detail-delivery"></div>
+    <a id="detail-link" class="detail-open-link secondary-btn" href="#" target="_blank"
+      >前往 GitLab</a
+    >
+    <div class="detail-divider"></div>
+    <h3 class="detail-section-title">相關 MRs</h3>
+    <div id="detail-merge-requests" class="detail-merge-requests">
+      <div class="empty-state">等待載入中...</div>
+    </div>
+    <h3 class="detail-section-title">相關 Issues</h3>
+    <div id="detail-linked-items" class="detail-linked-items">
+      <div class="empty-state">等待載入中...</div>
+    </div>
+    <div class="detail-divider"></div>
+    <div class="detail-section-header">
+      <h3 class="detail-section-title">討論內容</h3>
+      <button id="btn-ai-summary" class="ai-summary-btn" title="使用 AI 摘要">AI 摘要</button>
+    </div>
+    <div id="ai-summary-box" class="ai-summary-box" style="display: none"></div>
+    <div id="detail-discussions" class="detail-discussions">
+      <div class="empty-state">等待載入中...</div>
+    </div>
+  </div>
+</div>
+
+<button id="chat-fab" class="chat-fab" title="AI Issue 助理">
+  <svg
+    width="22"
+    height="22"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+</button>
+
+<div id="chat-panel" class="chat-panel">
+  <div class="chat-panel-header">
+    <h3>AI Issue 助理</h3>
+    <div class="chat-header-actions">
+      <button id="chat-clear" class="ghost-btn chat-header-btn" title="清除對話">⟲</button>
+      <button id="chat-close" class="ghost-btn chat-header-btn" title="關閉">×</button>
+    </div>
+  </div>
+  <div id="chat-messages" class="chat-messages">
+    <div class="chat-msg assistant">
+      <div class="chat-msg-content">
+        你可以直接問我目前 Issue 狀況、風險、誰最忙，或哪幾個 Issue 最值得優先追蹤。
+        <div class="chat-suggestions">
+          <button class="chat-suggestion-btn">這週最危險的是什麼？</button>
+          <button class="chat-suggestion-btn">誰的 issue 最久沒動？</button>
+          <button class="chat-suggestion-btn">目前逾期的 issue 有哪些？</button>
+          <button class="chat-suggestion-btn">各模組負責人的工作量？</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="chat-input-area">
+    <input
+      id="chat-input"
+      type="text"
+      placeholder="輸入你想查的 Issue 問題..."
+      autocomplete="off"
+    />
+    <button id="chat-send" class="chat-send-btn" title="送出">
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <line x1="22" y1="2" x2="11" y2="13" />
+        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+      </svg>
+    </button>
+  </div>
+</div>
+
+<div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>

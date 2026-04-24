@@ -1,0 +1,174 @@
+<section id="view-arrange" class="workspace-view">
+  <section class="page-hero">
+    <div>
+      <div class="view-eyebrow">Views / Issue 整理</div>
+      <h2 class="view-title">Issue 整理</h2>
+      <p class="view-subtitle">
+        貼上 Issue URL 或 GitLab filter URL，預覽後直接做 Gemini 整理與 Excel 匯出。
+      </p>
+    </div>
+  </section>
+
+  <div class="issue-workspace-grid">
+    <section class="panel issue-workspace-panel">
+      <div class="section-title-row">
+        <h2>1. 輸入來源</h2>
+      </div>
+      <label for="arrange-url-list"
+        >貼上單筆/多筆 Issue URL 或一個篩選頁面 URL。請先完成連線設定。</label
+      >
+      <textarea
+        id="arrange-url-list"
+        class="arrange-textarea"
+        rows="9"
+        placeholder="格式一：多行 Issue URL（支援整筆貼上，系統只抓 http 開頭的行）&#10;格式二：貼入 GitLab 篩選清單的 URL（例如包含狀態、作者、標籤等條件的 Issue 列表網址）"
+      ></textarea>
+      <div class="button-row">
+        <button id="btn-arrange-preview" class="secondary-btn">預覽清單</button>
+      </div>
+      <div id="arrange-status" class="inline-status idle">尚未載入任何 Issue。</div>
+    </section>
+
+    <section class="panel issue-workspace-panel">
+      <div class="section-title-row">
+        <h2>2. Prompt 模板</h2>
+      </div>
+      <div class="arrange-template-row">
+        <label class="inline-control arrange-template-select">
+          模板
+          <select id="arrange-prompt-template-select"></select>
+        </label>
+        <input
+          id="arrange-prompt-template-name"
+          class="arrange-template-name"
+          placeholder="新模板名稱（例如：Backend 精簡版）"
+        />
+      </div>
+      <div class="button-row compact">
+        <button id="btn-arrange-template-save" class="secondary-btn">覆蓋儲存目前模板</button>
+        <button id="btn-arrange-template-save-as" class="ghost-btn">另存新模板</button>
+        <button id="btn-arrange-template-delete" class="ghost-btn">刪除模板</button>
+      </div>
+      <label for="arrange-prompt">Workspace Prompt</label>
+      <textarea id="arrange-prompt" class="arrange-textarea prompt-textarea" rows="13"></textarea>
+      <small class="field-hint">可直接調整整理風格，會套用到目前頁面的批次整理流程。</small>
+    </section>
+
+    <section class="panel issue-workspace-panel issue-workspace-controls">
+      <div class="section-title-row">
+        <h2>3. 處理控制</h2>
+        <label class="inline-control">
+          Model
+          <select id="arrange-model-select">
+            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+            <option value="gemma-4-31b-it" selected>gemma-4-31b-it</option>
+          </select>
+        </label>
+      </div>
+      <div class="button-row">
+        <button id="btn-arrange-run-batch" class="primary-btn">執行全部（批次）</button>
+        <button id="btn-arrange-run-selected" class="secondary-btn">執行全部（目前選取）</button>
+        <button id="btn-arrange-run-scrape" class="ghost-btn">只跑 擷取 Issue</button>
+        <button id="btn-arrange-run-llm" class="ghost-btn">只跑 LLM 整理</button>
+        <button id="btn-arrange-stop-batch" class="ghost-btn" disabled>中止批次</button>
+        <button id="btn-arrange-export-excel" class="ghost-btn">匯出 Excel</button>
+      </div>
+      <small class="field-hint">可執行全部流程（擷取 Issue+LLM整理+匯出）或分階段執行。</small>
+    </section>
+
+    <section class="panel issue-workspace-panel issue-workspace-jobs">
+      <div class="section-title-row">
+        <h2>4. 處理佇列</h2>
+        <span id="arrange-job-count" class="hint">0 筆</span>
+      </div>
+      <div id="arrange-job-list" class="arrange-job-list">
+        <div class="empty-state">先貼上 URL 並預覽，這裡會出現待整理的 Issue。</div>
+      </div>
+    </section>
+
+    <section class="panel issue-workspace-panel issue-workspace-result">
+      <div class="section-title-row">
+        <div>
+          <h2 id="arrange-selected-title">5. 整理結果</h2>
+          <p id="arrange-selected-meta" class="workspace-meta">尚未選取 Issue。</p>
+        </div>
+        <span id="arrange-model-label" class="hint">Model: gemma-4-31b-it</span>
+      </div>
+
+      <div class="arrange-result-split">
+        <div class="arrange-result-pane">
+          <div class="out-header">
+            <div class="out-label">擷取 Issue 預覽</div>
+          </div>
+          <textarea
+            id="arrange-raw-text"
+            class="out-area arrange-output-textarea"
+            readonly
+          ></textarea>
+        </div>
+
+        <div class="arrange-result-pane">
+          <div class="out-header">
+            <div class="out-label">LLM 結果預覽</div>
+          </div>
+          <pre id="arrange-result-text" class="arrange-result-output">尚未產生整理結果。</pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel issue-workspace-panel issue-workspace-history">
+      <details id="arrange-history-panel" class="arrange-history-panel">
+        <summary class="arrange-history-summary">
+          <div>
+            <div class="section-title-row">
+              <h2>6. 歷史存檔</h2>
+            </div>
+            <p class="workspace-meta">保留 scrape / result / Excel 輸出，方便回看與重用。</p>
+          </div>
+          <div class="arrange-history-summary-meta">
+            <span class="hint arrange-history-hint">可點擊展開 / 收合</span>
+            <span id="arrange-history-count" class="hint">0 筆</span>
+          </div>
+        </summary>
+
+        <div class="arrange-history-body">
+          <div class="arrange-history-toolbar">
+            <input
+              id="arrange-history-search"
+              class="arrange-history-search"
+              type="text"
+              placeholder="搜尋檔名..."
+            />
+            <select id="arrange-history-kind" class="arrange-history-kind">
+              <option value="all">全部類型</option>
+              <option value="scrape">Scrape</option>
+              <option value="result">LLM 結果</option>
+              <option value="excel">Excel</option>
+            </select>
+            <button id="btn-arrange-history-refresh" class="ghost-btn">重新整理</button>
+            <button id="btn-arrange-history-open-folder" class="ghost-btn">開啟資料夾</button>
+          </div>
+
+          <div class="arrange-history-layout">
+            <div id="arrange-history-list" class="arrange-history-list">
+              <div class="empty-state">尚未載入歷史存檔。</div>
+            </div>
+
+            <div class="arrange-history-preview">
+              <div class="out-header">
+                <div class="out-label" id="arrange-history-preview-title">尚未選取歷史檔案</div>
+                <button id="btn-arrange-history-open-file" class="ghost-btn" type="button" disabled>
+                  開啟檔案
+                </button>
+              </div>
+              <pre id="arrange-history-preview" class="arrange-result-output">
+請從左側選一筆歷史存檔。</pre
+              >
+            </div>
+          </div>
+        </div>
+      </details>
+    </section>
+  </div>
+</section>

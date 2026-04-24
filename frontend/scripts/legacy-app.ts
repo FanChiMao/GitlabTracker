@@ -5,14 +5,36 @@
   project_ref_history: string[];
   import_file: string;
   gemini_api_key: string;
-  enable_daily_sync: boolean;
-  daily_sync_time: string;
-  enable_weekly_report: boolean;
-  weekly_report_time: string;
 };
 
 const MAX_PROJECT_REF_HISTORY = 10;
+const MIN_SIDEBAR_WIDTH = 248;
+const MAX_SIDEBAR_WIDTH = 360;
 const LOCAL_CONFIG_CACHE_KEY = 'gitlab-tracker:config-cache';
+const UI_PREFERENCES_KEY = 'gitlab-tracker:ui-preferences';
+const ARRANGE_PROMPT_TEMPLATES_KEY = 'gitlab-tracker:arrange-prompt-templates';
+const AVAILABLE_GEMINI_MODELS = ['gemini-2.5-pro', 'gemini-2.0-flash', 'gemma-4-31b-it'] as const;
+const DEFAULT_GEMINI_MODEL = 'gemma-4-31b-it';
+const DEFAULT_UI_PREFERENCES = {
+  theme: 'dark',
+  scale: 100,
+  sidebarWidth: 304,
+  geminiModel: DEFAULT_GEMINI_MODEL,
+  arrangePrompt: `你是一位資深技術 PM，請根據提供的 GitLab Issue 原始資料，整理成清楚、可追蹤的中文摘要。
+
+請用以下段落輸出：
+## 問題摘要
+## 現況判讀
+## 風險與阻塞
+## 建議行動
+## 驗收與追蹤
+
+要求：
+- 保留具體事實，不要猜測不存在的資訊
+- 如果資訊不足，要明確寫出缺口
+- 以繁體中文撰寫
+- 盡量精簡但保有可執行性`,
+} as const;
 
 type DashboardResponse = {
   summary: Record<string, number | string | null>;
@@ -20,9 +42,7 @@ type DashboardResponse = {
   focus_progress: any[];
   risks: any[];
   last_sync: string | null;
-  last_report: string | null;
   issue_count: number;
-  latest_report_path: string | null;
 };
 
 type IssueItem = {
@@ -176,9 +196,70 @@ type AnalyticsResponse = {
   lifecycle: LifecycleData;
 };
 
+type ThemeMode = 'dark' | 'light';
+type GeminiModel = (typeof AVAILABLE_GEMINI_MODELS)[number];
+
+type UiPreferences = {
+  theme: ThemeMode;
+  scale: number;
+  sidebarWidth: number;
+  geminiModel: GeminiModel;
+  arrangePrompt: string;
+};
+
+type ArrangePreviewIssue = {
+  iid: number;
+  title: string;
+  web_url: string;
+  state: string;
+  assignees: string[];
+  milestone: {
+    title: string;
+    due_date: string;
+  } | null;
+  labels: string[];
+};
+
+type ArrangeJobStatus = 'previewed' | 'running' | 'done' | 'error';
+type ArrangePhaseStatus = 'waiting' | 'running' | 'success' | 'error' | 'skipped';
+type ArrangePromptTemplate = {
+  id: string;
+  name: string;
+  content: string;
+  readonly?: boolean;
+};
+
+type ArrangeJob = ArrangePreviewIssue & {
+  id: string;
+  raw_text: string;
+  result: string;
+  status: ArrangeJobStatus;
+  scrapeStatus: ArrangePhaseStatus;
+  llmStatus: ArrangePhaseStatus;
+  exportStatus: ArrangePhaseStatus;
+  error: string | null;
+  model: string | null;
+};
+
+type ArrangeHistoryKind = 'raw' | 'scrape' | 'result' | 'excel';
+
+type ArrangeHistoryFile = {
+  filename: string;
+  kind: ArrangeHistoryKind;
+  size: number;
+  mtime: string;
+  path: string;
+};
+
+type ArrangeHistoryFileResponse = {
+  filename: string;
+  kind: ArrangeHistoryKind;
+  path: string;
+  content?: string;
+};
+
 /* ── State ── */
 const state = {
-  latestReportPath: null as string | null,
   allIssues: [] as IssueItem[],
   mergeRequestsByIid: new Map<number, MergeRequestInfo[]>(),
   issueLinksByIid: new Map<number, LinkedItemInfo[]>(),
@@ -191,6 +272,18 @@ const state = {
   timelineRangeMode: 'month' as TimelineRangeMode,
   ganttMonth: '',
   ganttWeek: '',
+  currentView: 'dashboard',
+  uiPreferences: { ...DEFAULT_UI_PREFERENCES } as UiPreferences,
+  arrangePromptTemplates: [] as ArrangePromptTemplate[],
+  selectedArrangePromptTemplateId: '' as string,
+  arrangeJobs: [] as ArrangeJob[],
+  selectedArrangeJobId: null as string | null,
+  arrangeHistoryFiles: [] as ArrangeHistoryFile[],
+  selectedArrangeHistoryFilename: null as string | null,
+  selectedArrangeHistoryContent: '請從左側選一筆歷史存檔。' as string,
+  arrangeHistoryRootPath: '' as string,
+  arrangeBatchRunning: false,
+  arrangeBatchAbortController: null as AbortController | null,
 };
 
 /* ── Helpers ── */
@@ -206,6 +299,408 @@ function setStatus(text: string, type: 'idle' | 'success' | 'warn' | 'error' = '
   const pill = byId<HTMLDivElement>('status-pill');
   pill.textContent = text;
   pill.className = `status-pill ${type}`;
+
+  const panel = getById<HTMLElement>('status-panel-details');
+  if (panel) {
+    panel.classList.remove('status-idle', 'status-success', 'status-warn', 'status-error');
+    panel.classList.add(`status-${type}`);
+  }
+}
+
+function clampUiScale(value: number): number {
+  return Math.min(120, Math.max(90, Math.round(value / 5) * 5));
+}
+
+function clampSidebarWidth(value: number): number {
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(value)));
+}
+
+function coerceGeminiModel(value: string | undefined): GeminiModel {
+  return AVAILABLE_GEMINI_MODELS.includes(value as GeminiModel)
+    ? (value as GeminiModel)
+    : DEFAULT_GEMINI_MODEL;
+}
+
+function readUiPreferences(): UiPreferences {
+  try {
+    const raw = window.localStorage.getItem(UI_PREFERENCES_KEY);
+    if (!raw) return { ...DEFAULT_UI_PREFERENCES };
+    const parsed = JSON.parse(raw) as Partial<UiPreferences>;
+    return {
+      theme: parsed.theme === 'light' ? 'light' : 'dark',
+      scale: clampUiScale(Number(parsed.scale) || DEFAULT_UI_PREFERENCES.scale),
+      sidebarWidth: clampSidebarWidth(
+        Number(parsed.sidebarWidth) || DEFAULT_UI_PREFERENCES.sidebarWidth,
+      ),
+      geminiModel: coerceGeminiModel(parsed.geminiModel),
+      arrangePrompt:
+        typeof parsed.arrangePrompt === 'string' && parsed.arrangePrompt.trim()
+          ? parsed.arrangePrompt
+          : DEFAULT_UI_PREFERENCES.arrangePrompt,
+    };
+  } catch (error) {
+    console.warn('Unable to read UI preferences', error);
+    return { ...DEFAULT_UI_PREFERENCES };
+  }
+}
+
+function saveUiPreferences(): void {
+  try {
+    window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(state.uiPreferences));
+  } catch (error) {
+    console.warn('Unable to save UI preferences', error);
+  }
+}
+
+function applyUiPreferences(): void {
+  document.documentElement.dataset.theme = state.uiPreferences.theme;
+  document.documentElement.style.setProperty(
+    '--sidebar-width',
+    `${clampSidebarWidth(state.uiPreferences.sidebarWidth)}px`,
+  );
+  document.documentElement.style.setProperty(
+    '--font-scale',
+    String(state.uiPreferences.scale / 100),
+  );
+  document.body.style.zoom = '';
+
+  const promptField = getById<HTMLTextAreaElement>('arrange-prompt');
+  if (promptField && promptField.value !== state.uiPreferences.arrangePrompt) {
+    promptField.value = state.uiPreferences.arrangePrompt;
+  }
+
+  const modelSelect = getById<HTMLSelectElement>('pref-gemini-model');
+  if (modelSelect) modelSelect.value = state.uiPreferences.geminiModel;
+  const arrangeModelSelect = getById<HTMLSelectElement>('arrange-model-select');
+  if (arrangeModelSelect) arrangeModelSelect.value = state.uiPreferences.geminiModel;
+
+  const arrangeModelLabel = getById<HTMLElement>('arrange-model-label');
+  if (arrangeModelLabel && !getSelectedArrangeJob()) {
+    arrangeModelLabel.textContent = `Model: ${state.uiPreferences.geminiModel}`;
+  }
+
+  const scaleValue = getById<HTMLElement>('pref-scale-value');
+  if (scaleValue) scaleValue.textContent = `${state.uiPreferences.scale}%`;
+
+  const scaleRange = getById<HTMLInputElement>('pref-scale-range');
+  if (scaleRange) scaleRange.value = String(state.uiPreferences.scale);
+
+  getById<HTMLButtonElement>('pref-theme-dark')?.classList.toggle(
+    'active',
+    state.uiPreferences.theme === 'dark',
+  );
+  getById<HTMLButtonElement>('pref-theme-light')?.classList.toggle(
+    'active',
+    state.uiPreferences.theme === 'light',
+  );
+}
+
+function updateArrangePromptPreference(): void {
+  const field = getById<HTMLTextAreaElement>('arrange-prompt');
+  if (!field) return;
+  state.uiPreferences.arrangePrompt = field.value.trim() || DEFAULT_UI_PREFERENCES.arrangePrompt;
+  saveUiPreferences();
+}
+
+function updateGeminiModelPreference(): void {
+  const field = getById<HTMLSelectElement>('pref-gemini-model');
+  if (!field) return;
+  state.uiPreferences.geminiModel = coerceGeminiModel(field.value);
+  applyUiPreferences();
+  saveUiPreferences();
+}
+
+function updateArrangeGeminiModelPreference(): void {
+  const field = getById<HTMLSelectElement>('arrange-model-select');
+  if (!field) return;
+  state.uiPreferences.geminiModel = coerceGeminiModel(field.value);
+  applyUiPreferences();
+  saveUiPreferences();
+}
+
+function createDefaultArrangePromptTemplates(): ArrangePromptTemplate[] {
+  const prompt = state.uiPreferences.arrangePrompt?.trim() || DEFAULT_UI_PREFERENCES.arrangePrompt;
+  return [
+    {
+      id: 'default',
+      name: '預設整理模板',
+      content: prompt,
+      readonly: true,
+    },
+  ];
+}
+
+function sanitizeArrangePromptTemplates(value: unknown): ArrangePromptTemplate[] {
+  if (!Array.isArray(value)) return createDefaultArrangePromptTemplates();
+
+  const templates: ArrangePromptTemplate[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const source = item as Partial<ArrangePromptTemplate>;
+    const id = String(source.id || '').trim();
+    const name = String(source.name || '').trim();
+    const content = String(source.content || '').trim();
+    if (!id || !name || !content) continue;
+    if (templates.some((template) => template.id === id)) continue;
+    templates.push({
+      id,
+      name,
+      content,
+      readonly: Boolean(source.readonly),
+    });
+  }
+
+  if (!templates.length) return createDefaultArrangePromptTemplates();
+  if (!templates.some((template) => template.id === 'default')) {
+    templates.unshift(createDefaultArrangePromptTemplates()[0]);
+  }
+  return templates;
+}
+
+function saveArrangePromptTemplates(): void {
+  try {
+    window.localStorage.setItem(
+      ARRANGE_PROMPT_TEMPLATES_KEY,
+      JSON.stringify({
+        selectedId: state.selectedArrangePromptTemplateId,
+        templates: state.arrangePromptTemplates,
+      }),
+    );
+  } catch (error) {
+    console.warn('Unable to save arrange prompt templates', error);
+  }
+}
+
+function renderArrangePromptTemplates(): void {
+  const select = getById<HTMLSelectElement>('arrange-prompt-template-select');
+  if (!select) return;
+
+  select.innerHTML = state.arrangePromptTemplates
+    .map((template) => {
+      const selected = template.id === state.selectedArrangePromptTemplateId ? ' selected' : '';
+      const suffix = template.readonly ? '（預設）' : '';
+      return `<option value="${escapeHtml(template.id)}"${selected}>${escapeHtml(template.name)}${suffix}</option>`;
+    })
+    .join('');
+}
+
+function getSelectedArrangePromptTemplate(): ArrangePromptTemplate | null {
+  return (
+    state.arrangePromptTemplates.find(
+      (template) => template.id === state.selectedArrangePromptTemplateId,
+    ) ?? null
+  );
+}
+
+function applySelectedArrangePromptTemplate(): void {
+  const template = getSelectedArrangePromptTemplate();
+  const promptField = getById<HTMLTextAreaElement>('arrange-prompt');
+  const nameField = getById<HTMLInputElement>('arrange-prompt-template-name');
+  if (!template || !promptField) return;
+
+  promptField.value = template.content;
+  state.uiPreferences.arrangePrompt = template.content;
+  if (nameField) nameField.value = template.readonly ? '' : template.name;
+  saveUiPreferences();
+}
+
+function initArrangePromptTemplates(): void {
+  const defaults = createDefaultArrangePromptTemplates();
+  let templates = defaults;
+  let selectedId = defaults[0].id;
+
+  try {
+    const raw = window.localStorage.getItem(ARRANGE_PROMPT_TEMPLATES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as {
+        selectedId?: string;
+        templates?: ArrangePromptTemplate[];
+      };
+      templates = sanitizeArrangePromptTemplates(parsed.templates);
+      const storedId = String(parsed.selectedId || '').trim();
+      if (storedId && templates.some((template) => template.id === storedId)) {
+        selectedId = storedId;
+      }
+    }
+  } catch (error) {
+    console.warn('Unable to read arrange prompt templates', error);
+  }
+
+  state.arrangePromptTemplates = templates;
+  state.selectedArrangePromptTemplateId = selectedId;
+  renderArrangePromptTemplates();
+  applySelectedArrangePromptTemplate();
+  saveArrangePromptTemplates();
+}
+
+function selectArrangePromptTemplate(templateId: string): void {
+  if (!state.arrangePromptTemplates.some((template) => template.id === templateId)) return;
+  state.selectedArrangePromptTemplateId = templateId;
+  renderArrangePromptTemplates();
+  applySelectedArrangePromptTemplate();
+  saveArrangePromptTemplates();
+}
+
+function saveCurrentPromptToSelectedTemplate(silent = false): void {
+  const template = getSelectedArrangePromptTemplate();
+  const promptField = getById<HTMLTextAreaElement>('arrange-prompt');
+  if (!template || !promptField) return;
+
+  template.content = promptField.value.trim() || DEFAULT_UI_PREFERENCES.arrangePrompt;
+  if (template.id === 'default') {
+    state.uiPreferences.arrangePrompt = template.content;
+    saveUiPreferences();
+  }
+  renderArrangePromptTemplates();
+  saveArrangePromptTemplates();
+  if (!silent) setArrangeStatus(`已更新模板：${template.name}`, 'success');
+}
+
+function saveCurrentPromptAsNewTemplate(): void {
+  const promptField = getById<HTMLTextAreaElement>('arrange-prompt');
+  const nameField = getById<HTMLInputElement>('arrange-prompt-template-name');
+  if (!promptField || !nameField) return;
+
+  const name = nameField.value.trim();
+  const content = promptField.value.trim();
+  if (!name) {
+    setArrangeStatus('請先輸入新模板名稱。', 'warn');
+    return;
+  }
+  if (!content) {
+    setArrangeStatus('Prompt 內容不可為空。', 'warn');
+    return;
+  }
+
+  const existing = state.arrangePromptTemplates.find(
+    (template) => !template.readonly && template.name === name,
+  );
+  if (existing) {
+    existing.content = content;
+    state.selectedArrangePromptTemplateId = existing.id;
+    renderArrangePromptTemplates();
+    applySelectedArrangePromptTemplate();
+    saveArrangePromptTemplates();
+    nameField.value = '';
+    setArrangeStatus(`已覆蓋既有模板：${name}`, 'success');
+    return;
+  }
+
+  const id = `template-${Date.now().toString(36)}`;
+  state.arrangePromptTemplates.push({ id, name, content });
+  state.selectedArrangePromptTemplateId = id;
+  renderArrangePromptTemplates();
+  applySelectedArrangePromptTemplate();
+  saveArrangePromptTemplates();
+  nameField.value = '';
+  setArrangeStatus(`已新增模板：${name}`, 'success');
+}
+
+function deleteSelectedPromptTemplate(): void {
+  const template = getSelectedArrangePromptTemplate();
+  if (!template) return;
+  if (template.readonly || template.id === 'default') {
+    setArrangeStatus('預設模板不可刪除。', 'warn');
+    return;
+  }
+
+  state.arrangePromptTemplates = state.arrangePromptTemplates.filter(
+    (item) => item.id !== template.id,
+  );
+  state.selectedArrangePromptTemplateId = 'default';
+  renderArrangePromptTemplates();
+  applySelectedArrangePromptTemplate();
+  saveArrangePromptTemplates();
+  setArrangeStatus(`已刪除模板：${template.name}`, 'success');
+}
+
+function rerenderTimelineIfVisible(): void {
+  if (!state.allIssues.length) return;
+  if (!getById<HTMLElement>('tab-timeline')?.classList.contains('active')) return;
+  scheduleGanttRender(state.allIssues);
+}
+
+function initSidebarResizer(): void {
+  const resizer = getById<HTMLDivElement>('sidebar-resizer');
+  const shell = document.querySelector<HTMLElement>('.app-shell');
+  if (!resizer || !shell) return;
+
+  let dragging = false;
+
+  const stopDragging = () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('sidebar-resizing');
+    saveUiPreferences();
+    rerenderTimelineIfVisible();
+  };
+
+  window.addEventListener('pointermove', (event) => {
+    if (!dragging || shell.classList.contains('sidebar-collapsed')) return;
+    const shellRect = shell.getBoundingClientRect();
+    const nextWidth = clampSidebarWidth(event.clientX - shellRect.left);
+    if (nextWidth === state.uiPreferences.sidebarWidth) return;
+    state.uiPreferences.sidebarWidth = nextWidth;
+    applyUiPreferences();
+  });
+
+  window.addEventListener('pointerup', stopDragging);
+  window.addEventListener('pointercancel', stopDragging);
+
+  resizer.addEventListener('pointerdown', (event) => {
+    if (window.innerWidth <= 900 || shell.classList.contains('sidebar-collapsed')) return;
+    dragging = true;
+    document.body.classList.add('sidebar-resizing');
+    resizer.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+
+  resizer.addEventListener('dblclick', () => {
+    state.uiPreferences.sidebarWidth = DEFAULT_UI_PREFERENCES.sidebarWidth;
+    applyUiPreferences();
+    saveUiPreferences();
+    rerenderTimelineIfVisible();
+  });
+}
+
+function setArrangeStatus(
+  text: string,
+  type: 'idle' | 'success' | 'warn' | 'error' = 'idle',
+): void {
+  const status = getById<HTMLDivElement>('arrange-status');
+  if (!status) return;
+  status.textContent = text;
+  status.className = `inline-status ${type}`;
+}
+
+function showToast(
+  title: string,
+  message: string,
+  type: 'success' | 'warn' | 'error' = 'success',
+  duration = 3200,
+): void {
+  const region = getById<HTMLDivElement>('toast-region');
+  if (!region) return;
+
+  const toast = document.createElement('div');
+  toast.className = `app-toast ${type}`;
+  toast.innerHTML = `
+    <div class="app-toast-body">
+      <div class="app-toast-title">${escapeHtml(title)}</div>
+      <div class="app-toast-message">${escapeHtml(message)}</div>
+    </div>
+  `;
+
+  let removed = false;
+  const removeToast = () => {
+    if (removed) return;
+    removed = true;
+    toast.classList.add('is-leaving');
+    window.setTimeout(() => toast.remove(), 220);
+  };
+
+  region.appendChild(toast);
+  window.setTimeout(removeToast, duration);
 }
 
 async function applyAppVersionLabel(): Promise<void> {
@@ -221,15 +716,11 @@ async function applyAppVersionLabel(): Promise<void> {
   }
 }
 
-const ACTION_BTNS = [
-  'btn-sync-now',
-  'btn-refresh-dashboard',
-  'btn-generate-report',
-  'btn-save-config',
-];
+const ACTION_BTNS = ['btn-sync-now', 'btn-refresh-dashboard', 'btn-save-config'];
 function setActionButtonsEnabled(enabled: boolean): void {
   for (const id of ACTION_BTNS) {
-    const btn = byId<HTMLButtonElement>(id);
+    const btn = getById<HTMLButtonElement>(id);
+    if (!btn) continue;
     btn.disabled = !enabled;
     btn.style.opacity = enabled ? '' : '0.5';
     btn.style.pointerEvents = enabled ? '' : 'none';
@@ -250,6 +741,13 @@ function fmtShortDate(value: string | null | undefined): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+function fmtFileSize(bytes: number | null | undefined): string {
+  const size = Number(bytes) || 0;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function escapeHtml(text: string): string {
   const div = document.createElement('div');
   div.textContent = text;
@@ -264,10 +762,6 @@ function coerceConfig(config?: Partial<AppConfig> | null): AppConfig {
     project_ref_history: [] as string[],
     import_file: '',
     gemini_api_key: '',
-    enable_daily_sync: true,
-    daily_sync_time: '09:00',
-    enable_weekly_report: true,
-    weekly_report_time: '17:30',
     ...config,
   };
 
@@ -593,15 +1087,28 @@ function getDeliveryHighlight(issue: IssueItem): { kind: string; label: string; 
   return { kind: 'open', label: '目前狀態', value: '開啟中' };
 }
 
-async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function api<T>(
+  path: string,
+  method = 'GET',
+  body?: unknown,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
   const response = await fetch(`http://127.0.0.1:8765${path}`, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
+    signal: options?.signal,
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || response.statusText);
+    let parsedMessage = '';
+    try {
+      const parsed = JSON.parse(text) as { detail?: string; error?: string };
+      parsedMessage = parsed.detail || parsed.error || '';
+    } catch {
+      // Fall back to raw text below.
+    }
+    throw new Error(parsedMessage || text || response.statusText);
   }
   return response.json() as Promise<T>;
 }
@@ -620,10 +1127,6 @@ function readConfigForm(): AppConfig {
     import_file:
       (document.getElementById('import-file') as HTMLInputElement | null)?.value.trim() || '',
     gemini_api_key: byId<HTMLInputElement>('gemini-api-key').value.trim(),
-    enable_daily_sync: byId<HTMLInputElement>('enable-daily-sync').checked,
-    daily_sync_time: byId<HTMLInputElement>('daily-sync-time').value,
-    enable_weekly_report: byId<HTMLInputElement>('enable-weekly-report').checked,
-    weekly_report_time: byId<HTMLInputElement>('weekly-report-time').value,
   };
 }
 
@@ -635,10 +1138,6 @@ function fillConfigForm(config: AppConfig): void {
   const importEl = document.getElementById('import-file') as HTMLInputElement | null;
   if (importEl) importEl.value = config.import_file || '';
   byId<HTMLInputElement>('gemini-api-key').value = config.gemini_api_key || '';
-  byId<HTMLInputElement>('enable-daily-sync').checked = Boolean(config.enable_daily_sync);
-  byId<HTMLInputElement>('daily-sync-time').value = config.daily_sync_time || '09:00';
-  byId<HTMLInputElement>('enable-weekly-report').checked = Boolean(config.enable_weekly_report);
-  byId<HTMLInputElement>('weekly-report-time').value = config.weekly_report_time || '17:30';
 }
 
 /* ══════════════════════════════════════════════
@@ -1808,8 +2307,14 @@ function renderGanttEnhancedSafe(issues: IssueItem[]): void {
 
   const totalDays = days.length;
   const labelWidth = windowRange.mode === 'week' ? 300 : 260;
-  const dayWidth = windowRange.mode === 'week' ? 128 : totalDays <= 31 ? 36 : 24;
-  const gridTotalWidth = totalDays * dayWidth;
+  const baseDayWidth = windowRange.mode === 'week' ? 128 : totalDays <= 31 ? 36 : 24;
+  const baseGridTotalWidth = totalDays * baseDayWidth;
+  const availableGridWidth =
+    windowRange.mode === 'week'
+      ? Math.max(baseGridTotalWidth, container.clientWidth - labelWidth - 2)
+      : baseGridTotalWidth;
+  const dayWidth = availableGridWidth / totalDays;
+  const gridTotalWidth = dayWidth * totalDays;
   const todayStr = today.toISOString().slice(0, 10);
 
   const dayIndex = (date: Date): number =>
@@ -2425,6 +2930,614 @@ function populateTableFilters(issues: IssueItem[]): void {
     '<option value="">全部</option>' +
     labels.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
   lSel.value = lVal;
+}
+
+/* ══════════════════════════════════════════════
+   VIEW NAVIGATION + ISSUE WORKSPACE
+   ══════════════════════════════════════════════ */
+function setActiveView(view: string): void {
+  state.currentView = view;
+  document.querySelectorAll<HTMLElement>('.workspace-view').forEach((panel) => {
+    panel.classList.toggle('active', panel.id === `view-${view}`);
+  });
+  document.querySelectorAll<HTMLElement>('[data-view-target]').forEach((button) => {
+    button.classList.toggle('active', button.getAttribute('data-view-target') === view);
+  });
+
+  if (view === 'dashboard' && state.allIssues.length > 0) {
+    renderSpreadsheet();
+  }
+  if (view === 'arrange') {
+    renderArrangeJobs();
+    renderArrangeSelection();
+    void loadArrangeHistory();
+  }
+}
+
+function initViewNavigation(): void {
+  document.querySelectorAll<HTMLElement>('[data-view-target]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const target = button.getAttribute('data-view-target');
+      if (target) setActiveView(target);
+    });
+  });
+}
+
+function isArrangeFilterUrl(value: string): boolean {
+  return /\/-\/issues\?/.test(value.trim());
+}
+
+function getArrangeInputLines(): string[] {
+  return (byId<HTMLTextAreaElement>('arrange-url-list').value || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function toArrangeJob(issue: ArrangePreviewIssue): ArrangeJob {
+  return {
+    ...issue,
+    id: issue.web_url || `issue-${issue.iid}`,
+    raw_text: '',
+    result: '',
+    status: 'previewed',
+    scrapeStatus: 'waiting',
+    llmStatus: 'waiting',
+    exportStatus: 'waiting',
+    error: null,
+    model: null,
+  };
+}
+
+function getArrangeStatusLabel(status: ArrangeJobStatus): string {
+  switch (status) {
+    case 'running':
+      return '處理中';
+    case 'done':
+      return '完成';
+    case 'error':
+      return '失敗';
+    default:
+      return '待整理';
+  }
+}
+
+function getArrangePhaseLabel(status: ArrangePhaseStatus): string {
+  switch (status) {
+    case 'running':
+      return '進行中';
+    case 'success':
+      return '完成';
+    case 'error':
+      return '失敗';
+    case 'skipped':
+      return '略過';
+    default:
+      return '等待中';
+  }
+}
+
+function renderArrangeJobs(): void {
+  const container = byId<HTMLDivElement>('arrange-job-list');
+  const count = byId<HTMLElement>('arrange-job-count');
+  count.textContent = `${state.arrangeJobs.length} 筆`;
+
+  if (!state.arrangeJobs.length) {
+    container.innerHTML =
+      '<div class="empty-state">先貼上 URL 並預覽，這裡會出現待整理的 Issue。</div>';
+    return;
+  }
+
+  container.innerHTML = state.arrangeJobs
+    .map((job) => {
+      const assignees = job.assignees.length ? job.assignees.join(', ') : '未指派';
+      const milestone = job.milestone?.title || '無 Milestone';
+      const phaseBadge = (label: string, status: ArrangePhaseStatus) =>
+        `<span class="arrange-phase ${status}"><span class="dot"></span>${label}: ${getArrangePhaseLabel(status)}</span>`;
+      return `
+        <article class="arrange-job-card ${state.selectedArrangeJobId === job.id ? 'active' : ''}" data-arrange-job-id="${escapeHtml(job.id)}">
+          <div class="arrange-job-top">
+            <div>
+              <div class="arrange-job-title">#${job.iid} ${escapeHtml(job.title)}</div>
+              <div class="arrange-job-meta">
+                <span>${escapeHtml(job.state || '-')}</span>
+                <span>${escapeHtml(assignees)}</span>
+                <span>${escapeHtml(milestone)}</span>
+              </div>
+            </div>
+            <span class="arrange-job-status ${job.status}">${getArrangeStatusLabel(job.status)}</span>
+          </div>
+          <div class="arrange-job-phases">
+            ${phaseBadge('Scrape', job.scrapeStatus)}
+            ${phaseBadge('LLM', job.llmStatus)}
+            ${phaseBadge('Export', job.exportStatus)}
+          </div>
+          ${job.error ? `<div class="qi-error">${escapeHtml(job.error)}</div>` : ''}
+        </article>
+      `;
+    })
+    .join('');
+}
+
+function getSelectedArrangeJob(): ArrangeJob | null {
+  if (!state.selectedArrangeJobId) return null;
+  return state.arrangeJobs.find((job) => job.id === state.selectedArrangeJobId) ?? null;
+}
+
+function renderArrangeSelection(): void {
+  const title = byId<HTMLElement>('arrange-selected-title');
+  const meta = byId<HTMLElement>('arrange-selected-meta');
+  const raw = byId<HTMLTextAreaElement>('arrange-raw-text');
+  const result = byId<HTMLElement>('arrange-result-text');
+  const modelLabel = getById<HTMLElement>('arrange-model-label');
+  const job = getSelectedArrangeJob();
+
+  if (!job) {
+    title.textContent = '5. 整理結果';
+    meta.textContent = '尚未選取 Issue。';
+    raw.value = '';
+    result.textContent = '尚未產生整理結果。';
+    if (modelLabel) modelLabel.textContent = `Model: ${state.uiPreferences.geminiModel}`;
+    return;
+  }
+
+  title.textContent = `5. #${job.iid} ${job.title}`;
+  meta.textContent = `${job.state || '-'} · ${job.assignees.join(', ') || '未指派'} · ${job.milestone?.title || '無 Milestone'}`;
+  raw.value = job.raw_text || '';
+  result.textContent =
+    job.result ||
+    (job.status === 'error' ? `處理失敗：${job.error || '未知錯誤'}` : '尚未產生整理結果。');
+  if (modelLabel) modelLabel.textContent = `Model: ${job.model || state.uiPreferences.geminiModel}`;
+}
+
+function getSelectedArrangeHistoryFile(): ArrangeHistoryFile | null {
+  if (!state.selectedArrangeHistoryFilename) return null;
+  return (
+    state.arrangeHistoryFiles.find(
+      (file) => file.filename === state.selectedArrangeHistoryFilename,
+    ) ?? null
+  );
+}
+
+function renderArrangeHistoryList(): void {
+  const count = byId<HTMLElement>('arrange-history-count');
+  const list = byId<HTMLDivElement>('arrange-history-list');
+  const previewTitle = byId<HTMLElement>('arrange-history-preview-title');
+  const preview = byId<HTMLElement>('arrange-history-preview');
+  const openFileButton = byId<HTMLButtonElement>('btn-arrange-history-open-file');
+  const query =
+    getById<HTMLInputElement>('arrange-history-search')?.value.trim().toLowerCase() ?? '';
+  const kindFilter =
+    (getById<HTMLSelectElement>('arrange-history-kind')?.value as ArrangeHistoryKind | 'all') ??
+    'all';
+
+  const files = state.arrangeHistoryFiles.filter((file) => {
+    const matchesKind = kindFilter === 'all' || file.kind === kindFilter;
+    const matchesQuery = !query || file.filename.toLowerCase().includes(query);
+    return matchesKind && matchesQuery;
+  });
+
+  count.textContent = `${state.arrangeHistoryFiles.length} 筆`;
+  if (!files.length) {
+    list.innerHTML = '<div class="empty-state">沒有符合條件的歷史存檔。</div>';
+  } else {
+    list.innerHTML = files
+      .map((file) => {
+        const kindLabel =
+          file.kind === 'raw'
+            ? 'Raw'
+            : file.kind === 'scrape'
+              ? 'Scrape'
+              : file.kind === 'excel'
+                ? 'Excel'
+                : 'LLM 結果';
+        const isActive = file.filename === state.selectedArrangeHistoryFilename;
+        return `
+          <button
+            type="button"
+            class="arrange-history-item ${isActive ? 'active' : ''}"
+            data-arrange-history-file="${escapeHtml(file.filename)}"
+          >
+            <div class="arrange-history-name">${escapeHtml(file.filename)}</div>
+            <div class="arrange-history-meta">
+              <span class="arrange-history-kind-pill ${file.kind}">${kindLabel}</span>
+              <span>${escapeHtml(file.mtime)}</span>
+              <span>${escapeHtml(fmtFileSize(file.size))}</span>
+            </div>
+          </button>
+        `;
+      })
+      .join('');
+  }
+
+  const selectedFile = getSelectedArrangeHistoryFile();
+  if (!selectedFile) {
+    previewTitle.textContent = '尚未選取歷史檔案';
+    preview.textContent = state.selectedArrangeHistoryContent;
+    openFileButton.disabled = true;
+    return;
+  }
+
+  previewTitle.textContent = selectedFile.filename;
+  preview.textContent = state.selectedArrangeHistoryContent;
+  openFileButton.disabled = !selectedFile.path;
+}
+
+async function loadArrangeHistory(preserveSelection = true): Promise<void> {
+  const response = await api<{
+    files: ArrangeHistoryFile[];
+    root_path: string;
+  }>('/api/arrange/history');
+  const previousSelection = preserveSelection ? state.selectedArrangeHistoryFilename : null;
+  state.arrangeHistoryFiles = response.files || [];
+  state.arrangeHistoryRootPath = response.root_path || '';
+
+  const hasSelection =
+    !!previousSelection &&
+    state.arrangeHistoryFiles.some((file) => file.filename === previousSelection);
+  if (!hasSelection) {
+    state.selectedArrangeHistoryFilename = null;
+    state.selectedArrangeHistoryContent = '請從左側選一筆歷史存檔。';
+  }
+
+  renderArrangeHistoryList();
+}
+
+async function openArrangeHistoryFile(filename: string): Promise<void> {
+  const response = await api<ArrangeHistoryFileResponse>(
+    `/api/arrange/history/${encodeURIComponent(filename)}`,
+  );
+  state.selectedArrangeHistoryFilename = response.filename;
+  if (response.kind === 'excel') {
+    state.selectedArrangeHistoryContent = `這是 Excel 存檔：${response.filename}\n\n請使用右上角的「開啟檔案」查看完整內容。`;
+  } else {
+    state.selectedArrangeHistoryContent = response.content || '此存檔沒有可顯示的內容。';
+  }
+  renderArrangeHistoryList();
+}
+
+async function openSelectedArrangeHistoryFile(): Promise<void> {
+  const file = getSelectedArrangeHistoryFile();
+  if (!file?.path) {
+    setArrangeStatus('找不到可開啟的歷史檔案。', 'warn');
+    return;
+  }
+  await window.trackerBridge.openPath(file.path);
+}
+
+async function openArrangeHistoryFolder(): Promise<void> {
+  if (!state.arrangeHistoryRootPath) {
+    await loadArrangeHistory(false);
+  }
+  if (!state.arrangeHistoryRootPath) {
+    setArrangeStatus('尚未建立歷史存檔資料夾。', 'warn');
+    return;
+  }
+  await window.trackerBridge.openPath(state.arrangeHistoryRootPath);
+}
+
+function selectArrangeJob(jobId: string): void {
+  state.selectedArrangeJobId = jobId;
+  renderArrangeJobs();
+  renderArrangeSelection();
+}
+
+function setArrangeButtonsEnabled(enabled: boolean): void {
+  [
+    'btn-arrange-preview',
+    'btn-arrange-run-selected',
+    'btn-arrange-run-batch',
+    'btn-arrange-run-scrape',
+    'btn-arrange-run-llm',
+    'btn-arrange-export-excel',
+  ].forEach((id) => {
+    const button = getById<HTMLButtonElement>(id);
+    if (button) button.disabled = !enabled;
+  });
+  const stopButton = getById<HTMLButtonElement>('btn-arrange-stop-batch');
+  if (stopButton) stopButton.disabled = !state.arrangeBatchRunning;
+}
+
+async function previewArrangeIssues(): Promise<void> {
+  const lines = getArrangeInputLines();
+  if (!lines.length) {
+    setArrangeStatus('請先貼上至少一筆 Issue URL 或 filter URL。', 'warn');
+    return;
+  }
+
+  setArrangeStatus('正在讀取 Issue 預覽...', 'idle');
+  setArrangeButtonsEnabled(false);
+  try {
+    const response =
+      lines.length === 1 && isArrangeFilterUrl(lines[0])
+        ? await api<{
+            issues: ArrangePreviewIssue[];
+            count: number;
+            errors?: Array<{ url: string; error: string }>;
+          }>('/api/arrange/resolve-filter', 'POST', { filter_url: lines[0] })
+        : await api<{
+            issues: ArrangePreviewIssue[];
+            count: number;
+            errors?: Array<{ url: string; error: string }>;
+          }>('/api/arrange/preview', 'POST', { urls: lines });
+
+    state.arrangeJobs = response.issues.map(toArrangeJob);
+    state.selectedArrangeJobId = state.arrangeJobs[0]?.id ?? null;
+    renderArrangeJobs();
+    renderArrangeSelection();
+
+    const errorCount = response.errors?.length ?? 0;
+    if (errorCount > 0) {
+      setArrangeStatus(
+        `已載入 ${response.count} 筆 Issue，另有 ${errorCount} 筆無法解析。`,
+        'warn',
+      );
+    } else {
+      setArrangeStatus(`已載入 ${response.count} 筆 Issue。`, 'success');
+    }
+  } finally {
+    setArrangeButtonsEnabled(true);
+  }
+}
+
+async function runArrangeJob(job: ArrangeJob): Promise<void> {
+  try {
+    await runArrangeScrapeJob(job);
+    if (job.status === 'error') return;
+    await runArrangeLlmJob(job);
+  } catch (error) {
+    if (!isAbortError(error)) {
+      const message = error instanceof Error ? error.message : String(error);
+      job.status = 'error';
+      job.error = message;
+    }
+  }
+}
+
+async function runSelectedArrangeJob(): Promise<void> {
+  const job = getSelectedArrangeJob();
+  if (!job) {
+    setArrangeStatus('請先從清單選擇要整理的 Issue。', 'warn');
+    return;
+  }
+
+  updateArrangePromptPreference();
+  setArrangeStatus(`正在整理 #${job.iid}...`, 'idle');
+  setArrangeButtonsEnabled(false);
+  try {
+    await runArrangeJob(job);
+    const success = job.status === 'done';
+    setArrangeStatus(
+      success ? `#${job.iid} 整理完成。` : `#${job.iid} 整理失敗。`,
+      success ? 'success' : 'error',
+    );
+    showToast(
+      success ? '整理完成' : '整理失敗',
+      success ? `#${job.iid} 已完成整理。` : `#${job.iid} 處理失敗。`,
+      success ? 'success' : 'error',
+    );
+  } finally {
+    setArrangeButtonsEnabled(true);
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /abort/i.test(message);
+}
+
+async function runArrangeScrapeJob(job: ArrangeJob, signal?: AbortSignal): Promise<void> {
+  job.status = 'running';
+  job.scrapeStatus = 'running';
+  job.llmStatus = 'waiting';
+  job.exportStatus = 'waiting';
+  job.result = '';
+  job.model = null;
+  job.error = null;
+  renderArrangeJobs();
+  renderArrangeSelection();
+  try {
+    const result = await api<{
+      issue: ArrangePreviewIssue;
+      raw_text: string;
+      saved_raw_path: string;
+    }>(
+      '/api/arrange/scrape',
+      'POST',
+      {
+        url: job.web_url,
+        system_prompt: byId<HTMLTextAreaElement>('arrange-prompt').value.trim(),
+        preferred_model: state.uiPreferences.geminiModel,
+      },
+      { signal },
+    );
+    Object.assign(job, result.issue, {
+      raw_text: result.raw_text,
+      status: 'previewed' as ArrangeJobStatus,
+      scrapeStatus: 'success' as ArrangePhaseStatus,
+      llmStatus: 'waiting' as ArrangePhaseStatus,
+      exportStatus: 'waiting' as ArrangePhaseStatus,
+      error: null,
+    });
+    await loadArrangeHistory();
+  } catch (error) {
+    if (!isAbortError(error)) {
+      const message = error instanceof Error ? error.message : String(error);
+      job.status = 'error';
+      job.scrapeStatus = 'error';
+      job.llmStatus = 'skipped';
+      job.exportStatus = 'skipped';
+      job.error = message;
+    }
+    throw error;
+  } finally {
+    renderArrangeJobs();
+    renderArrangeSelection();
+  }
+}
+
+async function runArrangeLlmJob(job: ArrangeJob, signal?: AbortSignal): Promise<void> {
+  if (!job.raw_text) {
+    job.status = 'error';
+    job.llmStatus = 'error';
+    job.error = '尚無 Scrape 資料，請先執行擷取 Issue。';
+    renderArrangeJobs();
+    renderArrangeSelection();
+    return;
+  }
+  job.status = 'running';
+  job.scrapeStatus = 'success';
+  job.llmStatus = 'running';
+  job.exportStatus = 'waiting';
+  job.error = null;
+  renderArrangeJobs();
+  renderArrangeSelection();
+  try {
+    const result = await api<{
+      result: string;
+      model: string;
+      saved_result_path: string | null;
+    }>(
+      '/api/arrange/llm',
+      'POST',
+      {
+        url: job.web_url,
+        raw_text: job.raw_text,
+        system_prompt: byId<HTMLTextAreaElement>('arrange-prompt').value.trim(),
+        preferred_model: state.uiPreferences.geminiModel,
+      },
+      { signal },
+    );
+    job.result = result.result;
+    job.model = result.model;
+    job.status = 'done';
+    job.llmStatus = 'success';
+    job.exportStatus = 'success';
+    job.error = null;
+    await loadArrangeHistory();
+  } catch (error) {
+    if (!isAbortError(error)) {
+      const message = error instanceof Error ? error.message : String(error);
+      job.status = 'error';
+      job.llmStatus = 'error';
+      job.exportStatus = 'skipped';
+      job.error = message;
+    }
+    throw error;
+  } finally {
+    renderArrangeJobs();
+    renderArrangeSelection();
+  }
+}
+
+async function runArrangeBatchByMode(mode: 'all' | 'scrape' | 'llm'): Promise<void> {
+  if (state.arrangeBatchRunning) {
+    setArrangeStatus('批次整理進行中，請先完成或中止。', 'warn');
+    return;
+  }
+  if (!state.arrangeJobs.length) {
+    await previewArrangeIssues();
+    if (!state.arrangeJobs.length) return;
+  }
+  updateArrangePromptPreference();
+  state.arrangeBatchRunning = true;
+  state.arrangeBatchAbortController = new AbortController();
+  setArrangeButtonsEnabled(false);
+  let successCount = 0;
+  let aborted = false;
+  try {
+    for (const job of state.arrangeJobs) {
+      state.selectedArrangeJobId = job.id;
+      renderArrangeJobs();
+      renderArrangeSelection();
+      const label = mode === 'scrape' ? '擷取' : mode === 'llm' ? 'LLM 整理' : '整理';
+      setArrangeStatus(`正在${label} #${job.iid}...`, 'idle');
+      try {
+        const signal = state.arrangeBatchAbortController.signal;
+        if (mode === 'scrape') await runArrangeScrapeJob(job, signal);
+        else if (mode === 'llm') await runArrangeLlmJob(job, signal);
+        else await runArrangeJob(job);
+      } catch (error) {
+        if (isAbortError(error)) {
+          aborted = true;
+          break;
+        }
+      }
+      const succeeded =
+        mode === 'scrape'
+          ? job.scrapeStatus === 'success'
+          : mode === 'llm'
+            ? job.llmStatus === 'success'
+            : job.scrapeStatus === 'success' &&
+              job.llmStatus === 'success' &&
+              job.exportStatus === 'success';
+      if (succeeded) successCount += 1;
+    }
+    const modeLabel = mode === 'all' ? '批次整理' : mode === 'scrape' ? '擷取批次' : 'LLM 批次';
+    setArrangeStatus(
+      aborted
+        ? `${modeLabel}已中止：${successCount}/${state.arrangeJobs.length} 筆完成。`
+        : `${modeLabel}完成：${successCount}/${state.arrangeJobs.length} 筆成功。`,
+      aborted ? 'warn' : 'success',
+    );
+    showToast(
+      aborted ? '批次已中止' : '批次處理完成',
+      aborted
+        ? `${successCount}/${state.arrangeJobs.length} 筆已完成。`
+        : `${successCount}/${state.arrangeJobs.length} 筆成功。`,
+      aborted ? 'warn' : 'success',
+      3600,
+    );
+  } finally {
+    state.arrangeBatchAbortController = null;
+    state.arrangeBatchRunning = false;
+    setArrangeButtonsEnabled(true);
+  }
+}
+
+async function runArrangeBatch(): Promise<void> {
+  await runArrangeBatchByMode('all');
+}
+
+function stopArrangeBatch(): void {
+  if (state.arrangeBatchAbortController) {
+    state.arrangeBatchAbortController.abort();
+  }
+}
+
+async function exportArrangeExcel(): Promise<void> {
+  const urls = state.arrangeJobs.length
+    ? state.arrangeJobs.map((job) => job.web_url).filter(Boolean)
+    : getArrangeInputLines();
+
+  if (!urls.length) {
+    setArrangeStatus('請先貼上 Issue URL，或先做一次預覽。', 'warn');
+    return;
+  }
+
+  setArrangeStatus('正在匯出 Excel...', 'idle');
+  setArrangeButtonsEnabled(false);
+  try {
+    const result = await api<{
+      path: string;
+      count: number;
+      errors: Array<{ url: string; error: string }>;
+    }>('/api/arrange/export-excel', 'POST', { urls });
+    await loadArrangeHistory();
+    await window.trackerBridge.openPath(result.path);
+    setArrangeStatus(
+      `Excel 已匯出，共 ${result.count} 筆。`,
+      result.errors.length ? 'warn' : 'success',
+    );
+    showToast(
+      result.errors.length ? 'Excel 匯出完成（含警告）' : 'Excel 匯出完成',
+      `共匯出 ${result.count} 筆。`,
+      result.errors.length ? 'warn' : 'success',
+    );
+  } finally {
+    setArrangeButtonsEnabled(true);
+  }
 }
 
 /* ══════════════════════════════════════════════
@@ -3054,22 +4167,6 @@ function renderMilestoneProgressSafe(burndown: BurndownMilestone[]): void {
   `;
 }
 
-/* ── PDF Export ── */
-async function exportReportPdf(): Promise<void> {
-  setStatus('產生 PDF 報告中...');
-  try {
-    const { html } = await api<{ html: string; generated_at: string }>('/api/report/html');
-    const result = await window.trackerBridge.exportPdf(html);
-    if (result) {
-      setStatus('PDF 已匯出', 'success');
-    } else {
-      setStatus('取消匯出', 'idle');
-    }
-  } catch (err) {
-    handleError(err);
-  }
-}
-
 /* ══════════════════════════════════════════════
    TAB SWITCHING
    ══════════════════════════════════════════════ */
@@ -3144,9 +4241,7 @@ function renderDashboardData(data: DashboardResponse): void {
   renderCards('focus-progress', data.focus_progress, '本週暫無特別標記的重點推進。');
   renderCards('risk-blockers', data.risks, '目前沒有明顯風險或阻塞。');
   byId<HTMLElement>('last-sync').textContent = fmtDate(data.last_sync);
-  byId<HTMLElement>('last-report').textContent = fmtDate(data.last_report);
   byId<HTMLElement>('issue-count').textContent = String(data.issue_count ?? 0);
-  state.latestReportPath = data.latest_report_path;
 }
 
 async function loadDashboard(): Promise<void> {
@@ -3169,23 +4264,6 @@ async function syncNow(): Promise<void> {
   } finally {
     setActionButtonsEnabled(true);
   }
-}
-
-async function generateReport(): Promise<void> {
-  setStatus('產生週報中...');
-  await saveConfig();
-  const result = await api<{ report_path: string }>('/api/report/weekly', 'POST', {});
-  state.latestReportPath = result.report_path;
-  await loadDashboard();
-  setStatus('週報已產生', 'success');
-}
-
-async function openLatestReport(): Promise<void> {
-  if (!state.latestReportPath) {
-    setStatus('尚未找到週報檔案', 'warn');
-    return;
-  }
-  await window.trackerBridge.openPath(state.latestReportPath);
 }
 
 function renderIssueDeliverySummary(issue: IssueItem): void {
@@ -3680,6 +4758,7 @@ async function sendChatMessage(input: HTMLInputElement): Promise<void> {
     const result = await api<{ answer: string; model: string }>('/api/chat', 'POST', {
       question,
       history: chatHistory.slice(0, -1), // exclude current question (already in endpoint)
+      preferred_model: state.uiPreferences.geminiModel,
     });
     chatHistory.push({ role: 'assistant', content: result.answer });
     typingEl.remove();
@@ -3749,6 +4828,8 @@ function wireEvents(): void {
   enhanceTimelineControls();
   syncTimelineRangeControls();
   initChat();
+  initViewNavigation();
+  initSidebarResizer();
 
   const bind = <T extends HTMLElement>(
     id: string,
@@ -3771,6 +4852,13 @@ function wireEvents(): void {
   bind<HTMLButtonElement>('sidebar-toggle', 'click', () => {
     const shell = document.querySelector('.app-shell')!;
     shell.classList.toggle('sidebar-collapsed');
+    requestAnimationFrame(() => rerenderTimelineIfVisible());
+  });
+
+  let timelineResizeTimer: number | undefined;
+  window.addEventListener('resize', () => {
+    clearTimeout(timelineResizeTimer);
+    timelineResizeTimer = window.setTimeout(() => rerenderTimelineIfVisible(), 120);
   });
 
   // Sidebar config buttons
@@ -3799,11 +4887,76 @@ function wireEvents(): void {
   bind<HTMLButtonElement>('btn-save-config', 'click', () => saveConfig().catch(handleError));
   bind<HTMLButtonElement>('btn-sync-now', 'click', () => syncNow().catch(handleError));
   bind<HTMLButtonElement>('btn-refresh-dashboard', 'click', () => syncNow().catch(handleError));
-  bind<HTMLButtonElement>('btn-generate-report', 'click', () =>
-    generateReport().catch(handleError),
+  bind<HTMLButtonElement>('btn-arrange-preview', 'click', () =>
+    previewArrangeIssues().catch(handleError),
   );
-  bind<HTMLButtonElement>('btn-open-report', 'click', () => openLatestReport().catch(handleError));
-  bind<HTMLButtonElement>('btn-export-pdf', 'click', () => exportReportPdf().catch(handleError));
+  bind<HTMLButtonElement>('btn-arrange-run-selected', 'click', () =>
+    runSelectedArrangeJob().catch(handleError),
+  );
+  bind<HTMLButtonElement>('btn-arrange-run-batch', 'click', () =>
+    runArrangeBatch().catch(handleError),
+  );
+  bind<HTMLButtonElement>('btn-arrange-run-scrape', 'click', () =>
+    runArrangeBatchByMode('scrape').catch(handleError),
+  );
+  bind<HTMLButtonElement>('btn-arrange-run-llm', 'click', () =>
+    runArrangeBatchByMode('llm').catch(handleError),
+  );
+  bind<HTMLButtonElement>('btn-arrange-stop-batch', 'click', () => stopArrangeBatch());
+  bind<HTMLButtonElement>('btn-arrange-export-excel', 'click', () =>
+    exportArrangeExcel().catch(handleError),
+  );
+  bind<HTMLSelectElement>('arrange-prompt-template-select', 'change', () => {
+    const value = byId<HTMLSelectElement>('arrange-prompt-template-select').value;
+    selectArrangePromptTemplate(value);
+  });
+  bind<HTMLButtonElement>('btn-arrange-template-save', 'click', () =>
+    saveCurrentPromptToSelectedTemplate(),
+  );
+  bind<HTMLButtonElement>('btn-arrange-template-save-as', 'click', () =>
+    saveCurrentPromptAsNewTemplate(),
+  );
+  bind<HTMLButtonElement>('btn-arrange-template-delete', 'click', () =>
+    deleteSelectedPromptTemplate(),
+  );
+  bind<HTMLButtonElement>('btn-arrange-history-refresh', 'click', () =>
+    loadArrangeHistory(false).catch(handleError),
+  );
+  bind<HTMLButtonElement>('btn-arrange-history-open-folder', 'click', () =>
+    openArrangeHistoryFolder().catch(handleError),
+  );
+  bind<HTMLButtonElement>('btn-arrange-history-open-file', 'click', () =>
+    openSelectedArrangeHistoryFile().catch(handleError),
+  );
+  bind<HTMLTextAreaElement>('arrange-prompt', 'input', () => updateArrangePromptPreference());
+  bind<HTMLInputElement>('arrange-history-search', 'input', () => renderArrangeHistoryList());
+  bind<HTMLSelectElement>('arrange-history-kind', 'change', () => renderArrangeHistoryList());
+  bind<HTMLSelectElement>('pref-gemini-model', 'change', () => updateGeminiModelPreference());
+  bind<HTMLSelectElement>('arrange-model-select', 'change', () =>
+    updateArrangeGeminiModelPreference(),
+  );
+  bind<HTMLButtonElement>('pref-theme-dark', 'click', () => {
+    state.uiPreferences.theme = 'dark';
+    applyUiPreferences();
+    saveUiPreferences();
+  });
+  bind<HTMLButtonElement>('pref-theme-light', 'click', () => {
+    state.uiPreferences.theme = 'light';
+    applyUiPreferences();
+    saveUiPreferences();
+  });
+  bind<HTMLInputElement>('pref-scale-range', 'input', () => {
+    state.uiPreferences.scale = clampUiScale(
+      Number(byId<HTMLInputElement>('pref-scale-range').value),
+    );
+    applyUiPreferences();
+    saveUiPreferences();
+  });
+  bind<HTMLButtonElement>('pref-scale-reset', 'click', () => {
+    state.uiPreferences.scale = DEFAULT_UI_PREFERENCES.scale;
+    applyUiPreferences();
+    saveUiPreferences();
+  });
 
   // Recent hours input
   bind<HTMLInputElement>('recent-hours', 'change', () => renderRecentIssues());
@@ -3907,24 +5060,55 @@ function wireEvents(): void {
       if (issue) openIssueDetail(issue);
     }
   });
+
+  document.addEventListener('click', (e) => {
+    const jobCard = (e.target as HTMLElement).closest(
+      '[data-arrange-job-id]',
+    ) as HTMLElement | null;
+    const jobId = jobCard?.dataset.arrangeJobId;
+    if (jobId) selectArrangeJob(jobId);
+  });
+
+  document.addEventListener('click', (e) => {
+    const historyItem = (e.target as HTMLElement).closest(
+      '[data-arrange-history-file]',
+    ) as HTMLElement | null;
+    const filename = historyItem?.dataset.arrangeHistoryFile;
+    if (filename) {
+      void openArrangeHistoryFile(filename).catch(handleError);
+    }
+  });
+
+  getById<HTMLDetailsElement>('arrange-history-panel')?.addEventListener('toggle', (event) => {
+    if ((event.currentTarget as HTMLDetailsElement).open) {
+      void loadArrangeHistory().catch(handleError);
+    }
+  });
 }
 
 function handleError(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   console.error(error);
   setStatus(message, 'error');
+  if (state.currentView === 'arrange') {
+    setArrangeStatus(message, 'error');
+  }
 }
 
 /* ══════════════════════════════════════════════
    BOOT
    ══════════════════════════════════════════════ */
 async function boot(): Promise<void> {
+  state.uiPreferences = readUiPreferences();
+  initArrangePromptTemplates();
+  applyUiPreferences();
   await applyAppVersionLabel();
   const cachedConfig = readCachedConfig();
   if (cachedConfig) {
     fillConfigForm(cachedConfig);
   }
   wireEvents();
+  setActiveView('dashboard');
   try {
     await loadConfig();
   } catch (error) {

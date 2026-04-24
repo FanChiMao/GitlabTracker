@@ -1,0 +1,136 @@
+<aside class="sidebar">
+  <div class="sidebar-topbar">
+    <div class="brand">
+      <div class="brand-badge"><img src="./icon.png" alt="GT" /></div>
+      <div>
+        <h1>Gitlab Tracker</h1>
+        <p id="app-version-label">v1.0.0</p>
+      </div>
+    </div>
+    <button class="sidebar-toggle" id="sidebar-toggle" title="收合或展開側邊欄">☰</button>
+  </div>
+
+  <div class="sidebar-scroll">
+    <section class="sidebar-group">
+      <div class="sidebar-group-title">Views</div>
+      <button class="sidebar-nav-link active" data-view-target="dashboard" title="Dashboard">
+        <span class="sidebar-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M4 13.5h6.5V20H4z" />
+            <path d="M13.5 4H20v7.5h-6.5z" />
+            <path d="M13.5 13.5H20V20h-6.5z" />
+            <path d="M4 4h6.5v6.5H4z" />
+          </svg>
+        </span>
+        <span class="sidebar-nav-copy">
+          <span>Dashboard</span>
+        </span>
+      </button>
+      <button class="sidebar-nav-link" data-view-target="arrange" title="Issue 整理">
+        <span class="sidebar-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M7 5.5h10" />
+            <path d="M7 10.5h10" />
+            <path d="M7 15.5h6" />
+            <path d="M4.5 5.5h.01" />
+            <path d="M4.5 10.5h.01" />
+            <path d="M4.5 15.5h.01" />
+            <path d="M15.5 18.5 18 21l4-4" />
+          </svg>
+        </span>
+        <span class="sidebar-nav-copy">
+          <span>Issue 整理</span>
+        </span>
+      </button>
+    </section>
+  </div>
+
+  <div class="sidebar-footer">
+    <section class="sidebar-group">
+      <div class="sidebar-group-title">Tools</div>
+      <button class="sidebar-nav-link" data-view-target="connections" title="連線設定">
+        <span class="sidebar-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="3.25" />
+            <path
+              d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.4 1.4 0 0 1 0 2l-1.5 1.5a1.4 1.4 0 0 1-2 0l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a1.5 1.5 0 0 1-1.5 1.5h-2.2A1.5 1.5 0 0 1 9.2 20v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a1.4 1.4 0 0 1-2 0L3.9 17.7a1.4 1.4 0 0 1 0-2l.1-.1A1 1 0 0 0 4.2 14a1 1 0 0 0-.9-.6H3a1.5 1.5 0 0 1-1.5-1.5V9.7A1.5 1.5 0 0 1 3 8.2h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a1.4 1.4 0 0 1 0-2l1.5-1.5a1.4 1.4 0 0 1 2 0l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V2a1.5 1.5 0 0 1 1.5-1.5h2.2A1.5 1.5 0 0 1 14.3 2v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a1.4 1.4 0 0 1 2 0l1.5 1.5a1.4 1.4 0 0 1 0 2l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6h.2A1.5 1.5 0 0 1 22 9.7v2.2a1.5 1.5 0 0 1-1.5 1.5h-.2a1 1 0 0 0-.9.6Z"
+            />
+          </svg>
+        </span>
+        <span class="sidebar-nav-copy">
+          <span>連線設定</span>
+        </span>
+      </button>
+      <button class="sidebar-nav-link" data-view-target="preferences" title="Preference">
+        <span class="sidebar-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
+            <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+          </svg>
+        </span>
+        <span class="sidebar-nav-copy">
+          <span>個人偏好</span>
+        </span>
+      </button>
+    </section>
+
+    <details class="status-panel status-idle" id="status-panel-details">
+      <summary class="status-summary" title="檢視狀態詳情">
+        <span class="status-summary-icon" aria-hidden="true">
+          <svg
+            class="status-icon status-icon-idle"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+          >
+            <circle cx="12" cy="12" r="8.25" />
+            <path d="M12 8.5h.01" />
+            <path d="M12 11.5v4.25" />
+          </svg>
+          <svg
+            class="status-icon status-icon-success"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+          >
+            <circle cx="12" cy="12" r="8.25" />
+            <path d="m8.75 12.25 2.2 2.2 4.4-4.9" />
+          </svg>
+          <svg
+            class="status-icon status-icon-warn"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+          >
+            <path d="M12 4.5 20 18.5H4z" />
+            <path d="M12 9.5v4.25" />
+            <path d="M12 16.75h.01" />
+          </svg>
+          <svg
+            class="status-icon status-icon-error"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+          >
+            <circle cx="12" cy="12" r="8.25" />
+            <path d="m9.25 9.25 5.5 5.5" />
+            <path d="m14.75 9.25-5.5 5.5" />
+          </svg>
+        </span>
+        <span class="status-summary-copy">
+          <strong>目前狀態</strong>
+        </span>
+      </summary>
+      <div class="status-panel-body">
+        <div id="status-pill" class="status-pill idle">準備就緒</div>
+        <div class="meta-line"><span>最後同步</span><strong id="last-sync">-</strong></div>
+        <div class="meta-line"><span>Issue 數量</span><strong id="issue-count">0</strong></div>
+      </div>
+    </details>
+  </div>
+  <div class="sidebar-resizer" id="sidebar-resizer" title="拖曳調整側邊欄寬度"></div>
+</aside>

@@ -194,12 +194,12 @@ function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
 }
 
-function rendererPath(fileName: string): string {
+function frontendPath(fileName: string): string {
   if (app.isPackaged) {
-    // renderer/ is inside app.asar (listed in "files"), not extraResources
-    return path.join(app.getAppPath(), 'renderer', fileName);
+    // frontend/ is inside app.asar (listed in "files"), not extraResources
+    return path.join(app.getAppPath(), 'frontend', fileName);
   }
-  return path.join(__dirname, '..', '..', 'renderer', fileName);
+  return path.join(__dirname, '..', '..', 'frontend', fileName);
 }
 
 function backendRoot(): string {
@@ -248,7 +248,7 @@ function createWindow(): void {
   Menu.setApplicationMenu(null);
 
   const iconPath = app.isPackaged
-    ? path.join(app.getAppPath(), 'renderer', 'icon.png')
+    ? path.join(app.getAppPath(), 'frontend', 'icon.png')
     : path.join(__dirname, '..', '..', 'assets', 'icon.png');
 
   mainWindow = new BrowserWindow({
@@ -266,8 +266,8 @@ function createWindow(): void {
     },
   });
 
-  const htmlPath = rendererPath('index.html');
-  console.log('[renderer] htmlPath =', htmlPath);
+  const htmlPath = frontendPath('index.html');
+  console.log('[frontend] htmlPath =', htmlPath);
 
   mainWindow.loadFile(htmlPath);
   setWindowZoom(mainWindow, DEFAULT_ZOOM_FACTOR);
@@ -294,7 +294,7 @@ function createWindow(): void {
   mainWindow.webContents.on(
     'did-fail-load',
     (_event: Electron.Event, code: number, desc: string, validatedURL: string) => {
-      console.error('[renderer] did-fail-load', { code, desc, validatedURL });
+      console.error('[frontend] did-fail-load', { code, desc, validatedURL });
     },
   );
 

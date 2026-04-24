@@ -1,0 +1,225 @@
+/* ── Responsive ── */
+@media (max-width: 1350px) {
+  .issue-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1400px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+  .preferences-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 1200px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .tool-grid,
+  .issue-workspace-grid,
+  .arrange-result-split {
+    grid-template-columns: 1fr;
+  }
+  .preferences-grid {
+    grid-template-columns: 1fr;
+  }
+  .delivery-stats-grid,
+  .detail-delivery-grid {
+    grid-template-columns: 1fr;
+  }
+  .timeline-main-controls,
+  .timeline-period-controls,
+  .timeline-legend {
+    width: 100%;
+  }
+  .timeline-filters-panel {
+    width: 100%;
+    margin-left: 0;
+    align-items: stretch;
+  }
+  .timeline-filters-grid {
+    grid-template-columns: 1fr;
+  }
+  .timeline-control {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .timeline-controls select,
+  .timeline-controls input {
+    min-width: 0;
+    width: 100%;
+  }
+}
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    min-height: unset;
+    max-height: unset;
+    grid-template-rows: auto auto auto;
+    overflow: visible;
+    border-right: none;
+    border-bottom: 1px solid var(--border-glass);
+  }
+  .sidebar-scroll {
+    overflow: visible;
+    padding-right: 0;
+  }
+  .content {
+    max-height: unset;
+  }
+  .sidebar-toggle {
+    display: none;
+  }
+  .sidebar-resizer {
+    display: none;
+  }
+  .hero,
+  .page-hero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* ── Scrollbar (subtle glass) ── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+  background-clip: padding-box;
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Typography scale only ── */
+body {
+  font-size: calc(14px * var(--font-scale));
+}
+
+button,
+input,
+select,
+textarea {
+  font-size: calc(13px * var(--font-scale));
+}
+
+label,
+.brand p,
+.sidebar-group-title,
+.sidebar-nav-link small,
+.field-hint,
+.view-eyebrow,
+.hint,
+.status-summary-copy strong,
+.status-summary-copy span,
+.status-pill,
+.meta-line,
+.preference-hint,
+.metric-card h3,
+.table-wrap th,
+.timeline-summary,
+.timeline-legend,
+.gantt-header-label,
+.gantt-header-month,
+.gantt-header-day,
+.gantt-header-day-label,
+.gantt-header-day-date,
+.gantt-group-badge,
+.gantt-status-pill,
+.disc-badge,
+.state-badge,
+.tag,
+.signal-pill,
+.risk-tag,
+.detail-meta-label,
+.detail-meta-value,
+.chat-msg-time,
+.chat-empty,
+.chat-suggestion-btn {
+  font-size: calc(12px * var(--font-scale));
+}
+
+.brand h1,
+.detail-iid,
+.detail-close-btn,
+.detail-title {
+  font-size: calc(18px * var(--font-scale));
+}
+
+.metric-card strong,
+.view-title {
+  font-size: calc(28px * var(--font-scale));
+}
+
+.sidebar-nav-copy > span,
+.view-subtitle,
+.summary-item span,
+.issue-card h4,
+.issue-card p,
+.table-wrap td,
+.tab-btn,
+.timeline-control,
+.gantt-row-title,
+.gantt-row-label small,
+.pref-choice-btn,
+.chat-input-area input {
+  font-size: calc(13px * var(--font-scale));
+}
+
+body.detail-open .chat-panel.open {
+  right: 560px;
+  width: 360px;
+  max-width: calc(100vw - 608px);
+}
+
+body.detail-open .chat-fab {
+  right: 560px;
+}
+
+@media (max-width: 1380px) {
+  body.detail-open .chat-panel.open {
+    right: 548px;
+    width: 320px;
+    max-width: calc(100vw - 592px);
+  }
+
+  body.detail-open .chat-fab {
+    right: 548px;
+  }
+}
+
+@media (max-width: 1180px) {
+  body.detail-open .chat-panel.open {
+    left: 24px;
+    right: auto;
+    width: min(360px, calc(100vw - 96px));
+    max-width: calc(100vw - 96px);
+  }
+
+  body.detail-open .chat-fab {
+    left: 24px;
+    right: auto;
+  }
+}
