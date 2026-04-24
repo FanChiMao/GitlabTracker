@@ -503,8 +503,7 @@ body.sidebar-resizing .sidebar-resizer::before {
   flex-direction: column;
   min-width: 0;
   width: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 .view-eyebrow {
@@ -625,23 +624,19 @@ body.sidebar-resizing .sidebar-resizer::before {
 #view-dashboard .hero,
 #view-arrange .page-hero {
   flex: 0 0 auto;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--bg-sticky-strong);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  margin-left: -24px;
-  margin-right: -24px;
-  padding: 20px 24px 16px;
-  margin-top: -20px;
+}
+
+#view-arrange.workspace-view.active {
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 #view-dashboard .tab-content.active {
-  flex: 0 0 auto;
-  min-height: auto;
-  overflow: visible;
-  padding-right: 0;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
 }
 
 #view-arrange .issue-workspace-grid {

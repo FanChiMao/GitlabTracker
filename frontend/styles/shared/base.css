@@ -42,7 +42,10 @@
 
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
-  --border-glass: rgba(255, 255, 255, 0.12);
+  --body-bg-image:
+    radial-gradient(ellipse 120% 80% at 20% 10%, rgba(124, 156, 255, 0.08), transparent 50%),
+    radial-gradient(ellipse 100% 60% at 80% 90%, rgba(141, 114, 255, 0.06), transparent 50%),
+    radial-gradient(ellipse 80% 50% at 50% 50%, rgba(94, 210, 160, 0.03), transparent 60%);
   --border-glass-highlight: rgba(255, 255, 255, 0.2);
 
   --accent: var(--blue-400);
@@ -88,6 +91,10 @@
 html[data-theme='light'] {
   color-scheme: light;
 
+  --body-bg-image:
+    radial-gradient(ellipse 120% 80% at 18% 10%, rgba(105, 146, 230, 0.18), transparent 50%),
+    radial-gradient(ellipse 100% 60% at 78% 88%, rgba(95, 172, 147, 0.12), transparent 50%),
+    radial-gradient(ellipse 80% 50% at 50% 50%, rgba(255, 255, 255, 0.82), transparent 62%);
   --bg-base: #f4f7fb;
   --bg-surface: rgba(255, 255, 255, 0.82);
   --bg-surface-2: rgba(245, 248, 255, 0.92);
@@ -147,10 +154,7 @@ body {
   font-size: 14px;
   line-height: 1.6;
   background: var(--bg-base);
-  background-image:
-    radial-gradient(ellipse 120% 80% at 20% 10%, rgba(124, 156, 255, 0.08), transparent 50%),
-    radial-gradient(ellipse 100% 60% at 80% 90%, rgba(141, 114, 255, 0.06), transparent 50%),
-    radial-gradient(ellipse 80% 50% at 50% 50%, rgba(94, 210, 160, 0.03), transparent 60%);
+  background-image: var(--body-bg-image);
   background-attachment: fixed;
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
@@ -159,10 +163,7 @@ body {
     color var(--duration-normal) var(--ease-out);
 }
 html[data-theme='light'] body {
-  background-image:
-    radial-gradient(ellipse 120% 80% at 18% 10%, rgba(105, 146, 230, 0.18), transparent 50%),
-    radial-gradient(ellipse 100% 60% at 78% 88%, rgba(95, 172, 147, 0.12), transparent 50%),
-    radial-gradient(ellipse 80% 50% at 50% 50%, rgba(255, 255, 255, 0.82), transparent 62%);
+  background-image: var(--body-bg-image);
 }
 button,
 input,
