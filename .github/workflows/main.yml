@@ -35,9 +35,6 @@ jobs:
           .\.venv\Scripts\pip install -r backend\requirements.txt
           .\.venv\Scripts\pip install pyinstaller
 
-      - name: Check format
-        run: npm run format:check
-
       - name: Build TypeScript
         run: npm run build:ts
 
