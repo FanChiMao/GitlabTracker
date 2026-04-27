@@ -242,6 +242,7 @@ type ArrangeJob = ArrangePreviewIssue & {
 };
 
 type ArrangeHistoryKind = 'raw' | 'scrape' | 'result' | 'excel';
+type ArrangeHistoryPreviewMode = 'markdown' | 'raw';
 
 type ArrangeHistoryFile = {
   filename: string;
@@ -281,6 +282,7 @@ const state = {
   arrangeHistoryFiles: [] as ArrangeHistoryFile[],
   selectedArrangeHistoryFilename: null as string | null,
   selectedArrangeHistoryContent: '請從左側選一筆歷史存檔。' as string,
+  arrangeHistoryPreviewMode: 'markdown' as ArrangeHistoryPreviewMode,
   arrangeHistoryRootPath: '' as string,
   arrangeBatchRunning: false,
   arrangeBatchAbortController: null as AbortController | null,
@@ -3073,7 +3075,7 @@ function renderArrangeSelection(): void {
   const job = getSelectedArrangeJob();
 
   if (!job) {
-    title.textContent = '5. 整理結果';
+    title.textContent = '整理結果';
     meta.textContent = '尚未選取 Issue。';
     raw.value = '';
     result.textContent = '尚未產生整理結果。';
@@ -3081,7 +3083,7 @@ function renderArrangeSelection(): void {
     return;
   }
 
-  title.textContent = `5. #${job.iid} ${job.title}`;
+  title.textContent = `#${job.iid} ${job.title}`;
   meta.textContent = `${job.state || '-'} · ${job.assignees.join(', ') || '未指派'} · ${job.milestone?.title || '無 Milestone'}`;
   raw.value = job.raw_text || '';
   result.textContent =
@@ -3099,12 +3101,99 @@ function getSelectedArrangeHistoryFile(): ArrangeHistoryFile | null {
   );
 }
 
+function formatArrangeHistoryMarkdown(text: string): string {
+  const normalized = (text || '').replace(/\r\n/g, '\n');
+  const codeBlocks: string[] = [];
+  let escaped = escapeHtml(normalized).replace(/```([\s\S]*?)```/g, (_match, code) => {
+    const placeholder = `@@ARRANGE_HISTORY_CODE_${codeBlocks.length}@@`;
+    codeBlocks.push(`<pre class="arrange-history-md-code"><code>${code.trim()}</code></pre>`);
+    return placeholder;
+  });
+
+  escaped = escaped
+    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3 class="arrange-history-md-heading">$1</h3>')
+    .replace(/^# (.+)$/gm, '<h2 class="arrange-history-md-title">$1</h2>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/^(\d+)\. (.+)$/gm, '<li><strong>$1.</strong> $2</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`)
+    .replace(/\n{2,}/g, '<br/><br/>')
+    .replace(/\n/g, '<br/>');
+
+  codeBlocks.forEach((block, index) => {
+    escaped = escaped.replace(`@@ARRANGE_HISTORY_CODE_${index}@@`, block);
+  });
+
+  return escaped;
+}
+
+function renderArrangeHistoryPreview(selectedFile: ArrangeHistoryFile | null): void {
+  const previewTitle = byId<HTMLElement>('arrange-history-preview-title');
+  const rawPreview = byId<HTMLElement>('arrange-history-preview');
+  const markdownPreview = byId<HTMLElement>('arrange-history-preview-markdown');
+  const openFileButton = byId<HTMLButtonElement>('btn-arrange-history-open-file');
+  const copyTextButton = byId<HTMLButtonElement>('btn-arrange-history-copy-text');
+  const markdownButton = byId<HTMLButtonElement>('btn-arrange-history-preview-md');
+  const rawButton = byId<HTMLButtonElement>('btn-arrange-history-preview-raw');
+  const content = state.selectedArrangeHistoryContent || '此存檔沒有可顯示的內容。';
+  const canRenderMarkdown = !!selectedFile && selectedFile.kind !== 'excel';
+  const canCopyText = !!selectedFile && selectedFile.kind !== 'excel' && !!content.trim();
+  const effectiveMode: ArrangeHistoryPreviewMode = canRenderMarkdown
+    ? state.arrangeHistoryPreviewMode
+    : 'raw';
+
+  previewTitle.textContent = selectedFile?.filename || '尚未選取歷史檔案';
+  rawPreview.textContent = content;
+  rawPreview.hidden = effectiveMode !== 'raw';
+  markdownPreview.hidden = effectiveMode !== 'markdown';
+
+  if (effectiveMode === 'markdown') {
+    markdownPreview.innerHTML = formatArrangeHistoryMarkdown(content);
+  } else if (!selectedFile) {
+    markdownPreview.innerHTML = '<div class="empty-state">請從左側選一筆歷史存檔。</div>';
+  } else if (!canRenderMarkdown) {
+    markdownPreview.innerHTML = '<div class="empty-state">目前檔案不支援 MD 預覽。</div>';
+  } else {
+    markdownPreview.innerHTML = formatArrangeHistoryMarkdown(content);
+  }
+
+  openFileButton.disabled = !selectedFile?.path;
+  copyTextButton.disabled = !canCopyText;
+  markdownButton.disabled = !selectedFile || !canRenderMarkdown;
+  rawButton.disabled = !selectedFile;
+  markdownButton.classList.toggle('active', effectiveMode === 'markdown');
+  rawButton.classList.toggle('active', effectiveMode === 'raw');
+  markdownButton.setAttribute('aria-pressed', String(effectiveMode === 'markdown'));
+  rawButton.setAttribute('aria-pressed', String(effectiveMode === 'raw'));
+}
+
+function setArrangeHistoryPreviewMode(mode: ArrangeHistoryPreviewMode): void {
+  state.arrangeHistoryPreviewMode = mode;
+  renderArrangeHistoryPreview(getSelectedArrangeHistoryFile());
+}
+
+async function copySelectedArrangeHistoryContent(): Promise<void> {
+  const file = getSelectedArrangeHistoryFile();
+  const content = state.selectedArrangeHistoryContent?.trim() || '';
+  if (!file || file.kind === 'excel' || !content) {
+    setArrangeStatus('目前沒有可複製的文字內容。', 'warn');
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(state.selectedArrangeHistoryContent);
+    setArrangeStatus(`已複製 ${file.filename} 的文字內容。`, 'success');
+  } catch (error) {
+    console.error('Failed to copy arrange history content', error);
+    setArrangeStatus('複製失敗，請稍後再試。', 'error');
+  }
+}
+
 function renderArrangeHistoryList(): void {
   const count = byId<HTMLElement>('arrange-history-count');
   const list = byId<HTMLDivElement>('arrange-history-list');
-  const previewTitle = byId<HTMLElement>('arrange-history-preview-title');
-  const preview = byId<HTMLElement>('arrange-history-preview');
-  const openFileButton = byId<HTMLButtonElement>('btn-arrange-history-open-file');
   const query =
     getById<HTMLInputElement>('arrange-history-search')?.value.trim().toLowerCase() ?? '';
   const kindFilter =
@@ -3151,16 +3240,7 @@ function renderArrangeHistoryList(): void {
   }
 
   const selectedFile = getSelectedArrangeHistoryFile();
-  if (!selectedFile) {
-    previewTitle.textContent = '尚未選取歷史檔案';
-    preview.textContent = state.selectedArrangeHistoryContent;
-    openFileButton.disabled = true;
-    return;
-  }
-
-  previewTitle.textContent = selectedFile.filename;
-  preview.textContent = state.selectedArrangeHistoryContent;
-  openFileButton.disabled = !selectedFile.path;
+  renderArrangeHistoryPreview(selectedFile);
 }
 
 async function loadArrangeHistory(preserveSelection = true): Promise<void> {
@@ -4927,6 +5007,15 @@ function wireEvents(): void {
   );
   bind<HTMLButtonElement>('btn-arrange-history-open-file', 'click', () =>
     openSelectedArrangeHistoryFile().catch(handleError),
+  );
+  bind<HTMLButtonElement>('btn-arrange-history-copy-text', 'click', () =>
+    copySelectedArrangeHistoryContent().catch(handleError),
+  );
+  bind<HTMLButtonElement>('btn-arrange-history-preview-md', 'click', () =>
+    setArrangeHistoryPreviewMode('markdown'),
+  );
+  bind<HTMLButtonElement>('btn-arrange-history-preview-raw', 'click', () =>
+    setArrangeHistoryPreviewMode('raw'),
   );
   bind<HTMLTextAreaElement>('arrange-prompt', 'input', () => updateArrangePromptPreference());
   bind<HTMLInputElement>('arrange-history-search', 'input', () => renderArrangeHistoryList());

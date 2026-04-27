@@ -1,5 +1,5 @@
 <section id="view-arrange" class="workspace-view">
-  <section class="page-hero">
+  <section class="hero">
     <div>
       <div class="view-eyebrow">Views / Issue 整理</div>
       <h2 class="view-title">Issue 整理</h2>
@@ -12,11 +12,21 @@
   <div class="issue-workspace-grid">
     <section class="panel issue-workspace-panel">
       <div class="section-title-row">
-        <h2>1. 輸入來源</h2>
+        <div class="arrange-section-heading">
+          <span class="arrange-section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M10 13a5 5 0 0 0 7.07 0l1.76-1.76a5 5 0 1 0-7.07-7.07L10.5 5.4" />
+              <path d="M14 11a5 5 0 0 0-7.07 0l-1.76 1.76a5 5 0 0 0 7.07 7.07l1.26-1.25" />
+            </svg>
+          </span>
+          <div>
+            <h2>貼上來源</h2>
+            <p class="arrange-section-caption">
+              貼上單筆/多筆 Issue URL 或一個篩選頁面 URL。請先完成連線設定。
+            </p>
+          </div>
+        </div>
       </div>
-      <label for="arrange-url-list"
-        >貼上單筆/多筆 Issue URL 或一個篩選頁面 URL。請先完成連線設定。</label
-      >
       <textarea
         id="arrange-url-list"
         class="arrange-textarea"
@@ -31,10 +41,22 @@
 
     <section class="panel issue-workspace-panel">
       <div class="section-title-row">
-        <h2>2. Prompt 模板</h2>
+        <div class="arrange-section-heading">
+          <span class="arrange-section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M4 6h16" />
+              <path d="M7 12h10" />
+              <path d="M10 18h4" />
+            </svg>
+          </span>
+          <div>
+            <h2>調整 Prompt</h2>
+            <p class="arrange-section-caption">提供整理摘要prompt、重點抓什麼、輸出格式。</p>
+          </div>
+        </div>
       </div>
       <div class="arrange-template-row">
-        <label class="inline-control arrange-template-select">
+        <label class="inline-control arrange-template-select no-wrap">
           模板
           <select id="arrange-prompt-template-select"></select>
         </label>
@@ -49,14 +71,26 @@
         <button id="btn-arrange-template-save-as" class="ghost-btn">另存新模板</button>
         <button id="btn-arrange-template-delete" class="ghost-btn">刪除模板</button>
       </div>
-      <label for="arrange-prompt">Workspace Prompt</label>
+      <label for="arrange-prompt">LLM System Prompt (處理階段)</label>
       <textarea id="arrange-prompt" class="arrange-textarea prompt-textarea" rows="13"></textarea>
       <small class="field-hint">可直接調整整理風格，會套用到目前頁面的批次整理流程。</small>
     </section>
 
     <section class="panel issue-workspace-panel issue-workspace-controls">
       <div class="section-title-row">
-        <h2>3. 處理控制</h2>
+        <div class="arrange-section-heading">
+          <span class="arrange-section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M8 6v12l10-6-10-6Z" />
+            </svg>
+          </span>
+          <div>
+            <h2>開始處理</h2>
+            <p class="arrange-section-caption">
+              選模型後，可執行全部流程（擷取 Issue+LLM整理+匯出）或分階段執行。
+            </p>
+          </div>
+        </div>
         <label class="inline-control">
           Model
           <select id="arrange-model-select">
@@ -74,12 +108,26 @@
         <button id="btn-arrange-stop-batch" class="ghost-btn" disabled>中止批次</button>
         <button id="btn-arrange-export-excel" class="ghost-btn">匯出 Excel</button>
       </div>
-      <small class="field-hint">可執行全部流程（擷取 Issue+LLM整理+匯出）或分階段執行。</small>
     </section>
 
     <section class="panel issue-workspace-panel issue-workspace-jobs">
       <div class="section-title-row">
-        <h2>4. 處理佇列</h2>
+        <div class="arrange-section-heading">
+          <span class="arrange-section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M8 6h11" />
+              <path d="M8 12h11" />
+              <path d="M8 18h11" />
+              <path d="M4 6h.01" />
+              <path d="M4 12h.01" />
+              <path d="M4 18h.01" />
+            </svg>
+          </span>
+          <div>
+            <h2>處理佇列</h2>
+            <p class="arrange-section-caption">確認每一筆 Issue 的當前進度</p>
+          </div>
+        </div>
         <span id="arrange-job-count" class="hint">0 筆</span>
       </div>
       <div id="arrange-job-list" class="arrange-job-list">
@@ -89,9 +137,19 @@
 
     <section class="panel issue-workspace-panel issue-workspace-result">
       <div class="section-title-row">
-        <div>
-          <h2 id="arrange-selected-title">5. 整理結果</h2>
-          <p id="arrange-selected-meta" class="workspace-meta">尚未選取 Issue。</p>
+        <div class="arrange-section-heading">
+          <span class="arrange-section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M7 4h7l5 5v11H7z" />
+              <path d="M14 4v5h5" />
+              <path d="M9 13h6" />
+              <path d="M9 17h6" />
+            </svg>
+          </span>
+          <div>
+            <h2 id="arrange-selected-title">整理結果</h2>
+            <p id="arrange-selected-meta" class="workspace-meta">尚未選取 Issue。</p>
+          </div>
         </div>
         <span id="arrange-model-label" class="hint">Model: gemma-4-31b-it</span>
       </div>
@@ -122,9 +180,22 @@
         <summary class="arrange-history-summary">
           <div>
             <div class="section-title-row">
-              <h2>6. 歷史存檔</h2>
+              <div class="arrange-section-heading">
+                <span class="arrange-section-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M4 7a2 2 0 0 1 2-2h9l5 5v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z" />
+                    <path d="M9 11h6" />
+                    <path d="M9 15h6" />
+                  </svg>
+                </span>
+                <div>
+                  <h2>歷史存檔</h2>
+                  <p class="arrange-section-caption">
+                    保留輸出結果，可展開瀏覽 scrape、result 與 Excel 輸出。
+                  </p>
+                </div>
+              </div>
             </div>
-            <p class="workspace-meta">保留 scrape / result / Excel 輸出，方便回看與重用。</p>
           </div>
           <div class="arrange-history-summary-meta">
             <span class="hint arrange-history-hint">可點擊展開 / 收合</span>
@@ -157,14 +228,60 @@
 
             <div class="arrange-history-preview">
               <div class="out-header">
-                <div class="out-label" id="arrange-history-preview-title">尚未選取歷史檔案</div>
-                <button id="btn-arrange-history-open-file" class="ghost-btn" type="button" disabled>
-                  開啟檔案
-                </button>
+                <div class="arrange-history-preview-header-main">
+                  <div class="out-label" id="arrange-history-preview-title">尚未選取歷史檔案</div>
+                  <div
+                    class="arrange-history-preview-toggle"
+                    role="tablist"
+                    aria-label="歷史檔案預覽模式"
+                  >
+                    <button
+                      id="btn-arrange-history-preview-md"
+                      class="arrange-history-preview-mode active"
+                      type="button"
+                      aria-pressed="true"
+                    >
+                      MD Preview
+                    </button>
+                    <button
+                      id="btn-arrange-history-preview-raw"
+                      class="arrange-history-preview-mode"
+                      type="button"
+                      aria-pressed="false"
+                    >
+                      Raw String
+                    </button>
+                  </div>
+                </div>
+                <div class="arrange-history-preview-actions">
+                  <button
+                    id="btn-arrange-history-copy-text"
+                    class="secondary-btn"
+                    type="button"
+                    disabled
+                  >
+                    複製文字
+                  </button>
+                  <button
+                    id="btn-arrange-history-open-file"
+                    class="primary-btn"
+                    type="button"
+                    disabled
+                  >
+                    開啟檔案
+                  </button>
+                </div>
               </div>
               <pre id="arrange-history-preview" class="arrange-result-output">
 請從左側選一筆歷史存檔。</pre
               >
+              <div
+                id="arrange-history-preview-markdown"
+                class="arrange-history-markdown-preview"
+                hidden
+              >
+                <div class="empty-state">請從左側選一筆歷史存檔。</div>
+              </div>
             </div>
           </div>
         </div>

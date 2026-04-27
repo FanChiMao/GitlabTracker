@@ -335,10 +335,16 @@
 }
 
 .arrange-template-select {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
   width: 100%;
+  white-space: nowrap;
 }
 
 .arrange-template-select select {
+  min-width: 0;
   width: 100%;
 }
 
