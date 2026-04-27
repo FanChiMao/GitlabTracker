@@ -297,6 +297,18 @@ function getById<T extends HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
 }
 
+function ensureGanttTooltip(): HTMLDivElement {
+  const existing = getById<HTMLDivElement>('gantt-tooltip');
+  if (existing) return existing;
+
+  const tooltip = document.createElement('div');
+  tooltip.id = 'gantt-tooltip';
+  tooltip.className = 'gantt-tooltip';
+  tooltip.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(tooltip);
+  return tooltip;
+}
+
 function setStatus(text: string, type: 'idle' | 'success' | 'warn' | 'error' = 'idle') {
   const pill = byId<HTMLDivElement>('status-pill');
   pill.textContent = text;
@@ -1941,7 +1953,7 @@ function renderGanttEnhanced(issues: IssueItem[]): void {
     </div>
   `;
 
-  const tooltip = byId<HTMLDivElement>('gantt-tooltip');
+  const tooltip = ensureGanttTooltip();
   container.querySelectorAll<HTMLElement>('.gantt-bar').forEach((bar) => {
     bar.addEventListener('mouseenter', (event) => {
       const el = event.currentTarget as HTMLElement;
@@ -2158,7 +2170,7 @@ function renderCalendarView(issues: IssueItem[]): void {
   container.innerHTML = html;
 
   // Wire tooltip + click for calendar bars
-  const tooltip = byId<HTMLDivElement>('gantt-tooltip');
+  const tooltip = ensureGanttTooltip();
   container.querySelectorAll<HTMLElement>('.cal-bar').forEach((bar) => {
     bar.addEventListener('mouseenter', (event) => {
       const el = event.currentTarget as HTMLElement;
@@ -2266,7 +2278,7 @@ function decorateGanttRowAvatars(container: HTMLDivElement, issues: IssueItem[])
 function renderGanttEnhancedSafe(issues: IssueItem[]): void {
   const container = byId<HTMLDivElement>('gantt-chart');
   const summary = byId<HTMLDivElement>('gantt-summary');
-  const tooltip = byId<HTMLDivElement>('gantt-tooltip');
+  const tooltip = ensureGanttTooltip();
 
   if (!issues.length) {
     summary.textContent = '沒有可顯示的 issue。';
@@ -2543,17 +2555,17 @@ function renderGanttEnhancedSafe(issues: IssueItem[]): void {
       const el = event.currentTarget as HTMLElement;
       tooltip.innerHTML = `
         <h5>#${el.dataset.iid} ${el.dataset.title}</h5>
-        <p>Status: ${el.dataset.state}</p>
-        <p>Issue State: ${el.dataset.stateRaw}</p>
-        <p>Linked MR: ${el.dataset.mrCount}</p>
-        <p>Linked Items: ${el.dataset.linkedCount}</p>
-        <p>Blocked: ${el.dataset.blocked}</p>
-        <p>Assignee: ${el.dataset.assignees}</p>
+        <p>開發狀態: ${el.dataset.state}</p>
+        <p>Issue 狀態: ${el.dataset.stateRaw}</p>
+        <p>相關 MR: ${el.dataset.mrCount}</p>
+        <p>相關 Issues: ${el.dataset.linkedCount}</p>
+        <p>阻擋: ${el.dataset.blocked}</p>
+        <p>負責人: ${el.dataset.assignees}</p>
         <p>Milestone: ${el.dataset.milestone}</p>
-        <p>Module: ${el.dataset.module}</p>
-        <p>Range: ${el.dataset.created} - ${el.dataset.due}</p>
-        <p>Risk: ${el.dataset.risk}</p>
-        <p>Click to open detail</p>
+        <p>模組: ${el.dataset.module}</p>
+        <p>日期: ${el.dataset.created} - ${el.dataset.due}</p>
+        <p>風險: ${el.dataset.risk}</p>
+        <p>點擊以查看詳細資訊</p>
       `;
       tooltip.classList.add('visible');
     });
@@ -2604,7 +2616,7 @@ function renderGanttEnhancedSafe(issues: IssueItem[]): void {
 function renderCalendarViewSafe(issues: IssueItem[]): void {
   const container = byId<HTMLDivElement>('calendar-chart');
   const summary = byId<HTMLDivElement>('gantt-summary');
-  const tooltip = byId<HTMLDivElement>('gantt-tooltip');
+  const tooltip = ensureGanttTooltip();
 
   if (!issues.length) {
     summary.textContent = '沒有可顯示的 issue。';
@@ -3686,7 +3698,7 @@ function renderBurndownChart(ms: BurndownMilestone): void {
     <svg viewBox="0 0 ${W} ${H}" class="burndown-svg">
       ${gridLines}
       <path d="${openArea}" fill="rgba(124,156,255,0.1)" />
-      ${polyline(idealData, 'rgba(255,255,255,0.25)', true)}
+      ${polyline(idealData, 'var(--text-secondary)', true)}
       ${polyline(closedData, 'var(--green-400)')}
       ${polyline(openData, 'var(--accent)')}
       ${xLabels}
@@ -3695,7 +3707,7 @@ function renderBurndownChart(ms: BurndownMilestone): void {
         <text x="24" y="4" fill="var(--text-secondary)" font-size="10">剩餘 Open</text>
         <line x1="0" y1="16" x2="20" y2="16" stroke="var(--green-400)" stroke-width="2" />
         <text x="24" y="20" fill="var(--text-secondary)" font-size="10">已完成 Closed</text>
-        <line x1="0" y1="32" x2="20" y2="32" stroke="rgba(255,255,255,0.25)" stroke-width="2" stroke-dasharray="6,4" />
+          <line x1="0" y1="32" x2="20" y2="32" stroke="var(--text-secondary)" stroke-width="2" stroke-dasharray="6,4" />
         <text x="24" y="36" fill="var(--text-secondary)" font-size="10">理想進度</text>
       </g>
     </svg>
@@ -3771,7 +3783,7 @@ function renderBurndownChartSafe(ms: BurndownMilestone): void {
     <svg viewBox="0 0 ${width} ${height}" class="burndown-svg">
       ${gridLines}
       <path d="${openArea}" fill="rgba(124,156,255,0.1)" />
-      ${buildPolyline(idealData, 'rgba(255,255,255,0.25)', true)}
+      ${buildPolyline(idealData, 'var(--text-secondary)', true)}
       ${buildPolyline(closedData, 'var(--green-400)')}
       ${buildPolyline(openData, 'var(--accent)')}
       ${xLabels}
@@ -3780,7 +3792,7 @@ function renderBurndownChartSafe(ms: BurndownMilestone): void {
         <text x="24" y="4" fill="var(--text-secondary)" font-size="10">Open</text>
         <line x1="0" y1="16" x2="20" y2="16" stroke="var(--green-400)" stroke-width="2" />
         <text x="24" y="20" fill="var(--text-secondary)" font-size="10">Closed</text>
-        <line x1="0" y1="32" x2="20" y2="32" stroke="rgba(255,255,255,0.25)" stroke-width="2" stroke-dasharray="6,4" />
+          <line x1="0" y1="32" x2="20" y2="32" stroke="var(--text-secondary)" stroke-width="2" stroke-dasharray="6,4" />
         <text x="24" y="36" fill="var(--text-secondary)" font-size="10">Ideal</text>
       </g>
     </svg>
