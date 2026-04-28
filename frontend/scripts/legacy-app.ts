@@ -3296,16 +3296,8 @@ function toSafeHref(url: string): string {
   return '#';
 }
 
-function formatDiscussionMarkdown(text: string): string {
-  const normalized = (text || '').replace(/\r\n/g, '\n');
-  const codeBlocks: string[] = [];
-  let escaped = escapeHtml(normalized).replace(/```([\s\S]*?)```/g, (_match, code) => {
-    const placeholder = `@@DISCUSSION_CODE_${codeBlocks.length}@@`;
-    codeBlocks.push(`<pre class="discussion-md-code"><code>${code.trim()}</code></pre>`);
-    return placeholder;
-  });
-
-  escaped = escaped
+function formatDiscussionInlineMarkdown(escaped: string): string {
+  return escaped
     .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt, url) => {
       const safeHref = escapeHtml(toSafeHref(url));
       const safeAlt = alt.trim() ? escapeHtml(alt.trim()) : '附件圖片';
@@ -3315,23 +3307,142 @@ function formatDiscussionMarkdown(text: string): string {
       const safeHref = escapeHtml(toSafeHref(url));
       return `<a class="discussion-md-link" href="${safeHref}" target="_blank" rel="noreferrer">${label}</a>`;
     })
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function isDiscussionTableDelimiter(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.includes('|')) return false;
+  const cells = trimmed
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function parseDiscussionTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+function buildDiscussionTableHtml(lines: string[]): string {
+  const [headerLine, _delimiterLine, ...bodyLines] = lines;
+  const headers = parseDiscussionTableRow(headerLine);
+  const bodyRows = bodyLines.map(parseDiscussionTableRow);
+
+  return `
+    <div class="discussion-md-table-wrap">
+      <table class="discussion-md-table">
+        <thead>
+          <tr>${headers.map((cell) => `<th>${formatDiscussionInlineMarkdown(cell)}</th>`).join('')}</tr>
+        </thead>
+        <tbody>
+          ${bodyRows
+            .map(
+              (row) =>
+                `<tr>${row.map((cell) => `<td>${formatDiscussionInlineMarkdown(cell)}</td>`).join('')}</tr>`,
+            )
+            .join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function formatDiscussionMarkdownSection(text: string): string {
+  let working = (text || '').replace(/\r\n/g, '\n');
+  const codeBlocks: string[] = [];
+  const detailsBlocks: string[] = [];
+  const tableBlocks: string[] = [];
+
+  working = working.replace(/```([\s\S]*?)```/g, (_match, code) => {
+    const placeholder = `@@DISCUSSION_CODE_${codeBlocks.length}@@`;
+    codeBlocks.push(
+      `<pre class="discussion-md-code"><code>${escapeHtml(code.trim())}</code></pre>`,
+    );
+    return placeholder;
+  });
+
+  working = working.replace(/<details>([\s\S]*?)<\/details>/gi, (_match, inner) => {
+    const placeholder = `@@DISCUSSION_DETAILS_${detailsBlocks.length}@@`;
+    const summaryMatch = inner.match(/<summary>([\s\S]*?)<\/summary>/i);
+    const summaryRaw = summaryMatch?.[1]?.trim() || 'Details';
+    const bodyRaw = inner.replace(/<summary>[\s\S]*?<\/summary>/i, '').trim();
+    const summaryHtml = formatDiscussionInlineMarkdown(escapeHtml(summaryRaw));
+    const bodyHtml = bodyRaw ? formatDiscussionMarkdownSection(bodyRaw) : '';
+
+    detailsBlocks.push(`
+      <details class="discussion-md-details">
+        <summary>${summaryHtml}</summary>
+        <div class="discussion-md-details-body">${bodyHtml}</div>
+      </details>`);
+    return placeholder;
+  });
+
+  let escaped = escapeHtml(working);
+  escaped = formatDiscussionInlineMarkdown(escaped);
+
+  const lines = escaped.split('\n');
+  const renderedLines: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const current = lines[index];
+    const next = lines[index + 1];
+    if (current.includes('|') && next && isDiscussionTableDelimiter(next)) {
+      const tableLines = [current, next];
+      index += 2;
+      while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
+        tableLines.push(lines[index]);
+        index += 1;
+      }
+      index -= 1;
+      const placeholder = `@@DISCUSSION_TABLE_${tableBlocks.length}@@`;
+      tableBlocks.push(buildDiscussionTableHtml(tableLines));
+      renderedLines.push(placeholder);
+      continue;
+    }
+    renderedLines.push(current);
+  }
+  escaped = renderedLines.join('\n');
+
+  escaped = escaped
     .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
     .replace(/^### (.+)$/gm, '<h4>$1</h4>')
     .replace(/^## (.+)$/gm, '<h3>$1</h3>')
     .replace(/^# (.+)$/gm, '<h2>$1</h2>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(
+      /^- \[ \] (.+)$/gm,
+      '<li class="discussion-md-task"><input type="checkbox" disabled /> <span>$1</span></li>',
+    )
+    .replace(
+      /^- \[x\] (.+)$/gim,
+      '<li class="discussion-md-task"><input type="checkbox" checked disabled /> <span>$1</span></li>',
+    )
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/^(\d+)\. (.+)$/gm, '<li><strong>$1.</strong> $2</li>')
-    .replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`)
+    .replace(/(<li.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`)
     .replace(/\n{2,}/g, '<br/><br/>')
     .replace(/\n/g, '<br/>');
 
   codeBlocks.forEach((block, index) => {
     escaped = escaped.replace(`@@DISCUSSION_CODE_${index}@@`, block);
   });
+  detailsBlocks.forEach((block, index) => {
+    escaped = escaped.replace(`@@DISCUSSION_DETAILS_${index}@@`, block);
+  });
+  tableBlocks.forEach((block, index) => {
+    escaped = escaped.replace(`@@DISCUSSION_TABLE_${index}@@`, block);
+  });
 
   return escaped;
+}
+
+function formatDiscussionMarkdown(text: string): string {
+  return formatDiscussionMarkdownSection(text);
 }
 
 function renderArrangeHistoryPreview(selectedFile: ArrangeHistoryFile | null): void {
