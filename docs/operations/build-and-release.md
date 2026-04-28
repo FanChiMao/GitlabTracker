@@ -1,71 +1,70 @@
-# Build & Release
+# Build And Release
 
-## 1. 打包順序
+## 1. 打包指令
 
-`npm run dist` 會依序執行：
+正式打包使用：
 
-```text
-1. tsc -p tsconfig.json                   # TS → dist/
-2. PyInstaller --onedir backend/app.py    # Python → backend/dist/gitlab-tracker-backend/
-3. electron-builder                       # → release/Gitlab Tracker Setup x.y.z.exe
+```powershell
+npm run dist
 ```
 
-設定來源：
+流程如下：
 
-- TS：[tsconfig.json](../../tsconfig.json)
-- PyInstaller：[backend/gitlab-tracker-backend.spec](../../backend/gitlab-tracker-backend.spec)（也可由 `pack:backend` script 動態產生）
-- electron-builder：[package.json](../../package.json) 的 `"build"` 區段
+1. `npm run build:ts`
+2. `npm run pack:backend`
+3. `electron-builder`
 
-## 2. 確保 PyInstaller hidden imports
+## 2. 各段輸出
 
-Uvicorn 內部用了大量動態 import，[`package.json`](../../package.json) 的 `pack:backend` 已加上：
+### TypeScript
 
-```text
---hidden-import uvicorn.logging
---hidden-import uvicorn.lifespan
---hidden-import uvicorn.lifespan.on
---hidden-import uvicorn.protocols
---hidden-import uvicorn.protocols.http.h11_impl
---hidden-import uvicorn.protocols.http.httptools_impl
---hidden-import uvicorn.protocols.websockets.wsproto_impl
---hidden-import uvicorn.loops.asyncio
-```
+- 原始碼：`src/**/*.ts`、`frontend/**/*.ts`
+- 輸出：`dist/`
 
-> 新增 Python 套件後，若打包後啟動失敗（看 `release/win-unpacked/...` 的後端 stderr），通常都是缺 hidden import。
+### Python Backend
 
-## 3. extraResources 路徑
+- 入口：`backend/app.py`
+- 指令：`python -m PyInstaller --noconfirm --onedir --name gitlab-tracker-backend ...`
+- 輸出：`backend/dist/gitlab-tracker-backend/`
 
-`backend/dist/` 整個資料夾會被以 `extraResources` 帶入 `resources/backend/`。Main process 在 packaged 模式會用：
+### Electron Installer
 
-```text
-%APP%/resources/backend/dist/gitlab-tracker-backend/gitlab-tracker-backend.exe
-```
+- 設定來源：`package.json > build`
+- 輸出目錄：`release/`
+- Windows target：`nsis`
 
-對應 [main.ts](../../src/main.ts) `startBackend()` 的 `packagedExe` 路徑。
+## 3. 打包後執行方式
 
-## 4. 安裝檔輸出
+打包版啟動時：
 
-- 路徑：`release/Gitlab Tracker Setup <version>.exe`
-- NSIS 設定：`deleteAppDataOnUninstall: true`，解除安裝會清掉使用者的 `tracker-data/`，**含 token，請告知使用者**。
+- Electron main process 從 `resources/backend/dist/gitlab-tracker-backend/` 啟動後端
+- 後端資料目錄改為 `app.getPath('userData')/tracker-data`
+- `frontend/` 會隨 app 一起打包，不走 `extraResources`
 
-## 5. Release Checklist
+## 4. 產物位置
 
-- [ ] `package.json` `version` bump
-- [ ] `renderer/index.html` 顯示版本一致（目前是寫死 `v1.0.0`，請同步）
-- [ ] `npm run dist` 成功
-- [ ] 安裝後驗證：
-  - [ ] 可開啟主視窗
-  - [ ] `GET /api/health` 200
-  - [ ] 設定 + 同步成功
-  - [ ] 產週報、匯出 PDF 成功
-  - [ ] 解除安裝乾淨
+常見產物：
 
-## 6. 簽章與分發（待補）
+- `backend/dist/gitlab-tracker-backend/gitlab-tracker-backend.exe`
+- `release/Gitlab Tracker Setup <version>.exe`
+- `release/win-unpacked/`
 
-目前未做 code signing。建議分發前先：
+## 5. 發版前檢查
 
-- 取得 EV / OV code signing 憑證
-- 在 `package.json` `build.win` 加 `certificateFile` / `certificatePassword`
-- 啟用 electron-builder 自動簽章
+1. 更新 `package.json` 版本號
+2. 執行 `npm run format:check`
+3. 執行 `npm run dist`
+4. 安裝打包後的 App，確認：
+   - 可以正常開啟
+   - `/api/health` 正常
+   - GitLab 連線設定可儲存
+   - `Sync Now` 可用
+   - `Issue Arrange` 可 preview / process / export Excel
+   - HTML 轉 PDF 正常
+   - 外部 GitLab 連結可打開
 
-否則 SmartScreen 會擋。
+## 6. 常見打包注意事項
+
+- PyInstaller 需要帶 Uvicorn hidden imports，這已經寫在 `package.json` 的 `pack:backend`。
+- 若打包版後端啟動失敗，先看 `release/win-unpacked` 執行時的 stderr。
+- `nsis.deleteAppDataOnUninstall = true`，解除安裝會刪掉 userData 內的 `tracker-data`。

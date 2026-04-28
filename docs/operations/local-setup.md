@@ -1,80 +1,103 @@
 # Local Setup
 
-## 1. 系統需求
+## 1. 需求
 
-- Windows 10/11（主要支援平台；macOS/Linux 路徑邏輯已寫入但未驗證）
-- **Node.js 18+**（建議 LTS）
-- **Python 3.11+**（已測 3.11–3.13）
+- Windows 10/11
+- Node.js 18+
+- Python 3.11+
 - Git
 
-## 2. Clone & 安裝相依
+目前專案以 Windows 開發流程為主，因為 Electron 打包與本地路徑處理都先針對 Windows 驗證。
+
+## 2. 安裝相依
 
 ```powershell
 git clone <repo-url> GitlabTracker
 cd GitlabTracker
 
-# Node 相依
 npm install
 
-# Python 虛擬環境（重要：路徑必須是 .venv，main.ts 會優先找 .venv\Scripts\python.exe）
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r backend/requirements.txt
+python -m pip install -r backend\requirements.txt
 ```
 
-> 若 PowerShell 拒絕執行 `Activate.ps1`，先執行 `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned`。
+如果 PowerShell 擋住啟用虛擬環境，可先執行：
 
-## 3. 啟動開發
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+```
+
+## 3. 啟動開發模式
 
 ```powershell
 npm run dev
 ```
 
-實際做了：
+這個指令會做三件事：
 
-1. `tsc -p tsconfig.json` 編譯 `src/` + `renderer/` TS 到 `dist/`
-2. `electron .` 啟動 main process
-3. main process 自動 spawn `.venv\Scripts\python.exe backend/app.py --port 8765`
-4. 待 `/api/health` 200 後開窗
+1. `tsc -p tsconfig.json`
+2. 啟動 Electron
+3. 由 Electron 自動 spawn `backend/app.py --port 8765`
 
-> Renderer DevTools 在 dev mode 預設開啟。
+啟動成功後：
 
-## 4. 只跑後端（API 開發 / 排程驗證）
+- 後端 API 在 `http://127.0.0.1:8765`
+- UI 會以本地 HTML partials 載入
+
+## 4. 單獨啟動後端
+
+如果你只想測 API：
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python backend/app.py --port 8765
-# 或一次性任務
-python backend/app.py --once fetch
-python backend/app.py --once weekly-report
+python backend\app.py --port 8765
 ```
 
-可用 `http://127.0.0.1:8765/docs` 看 FastAPI 自動產生的 Swagger UI。
-
-## 5. 設定資料目錄
-
-- Dev：預設 `backend/data/`
-- 也可用環境變數覆寫：
+常用附加指令：
 
 ```powershell
-$env:GITLAB_TRACKER_DATA_DIR = "D:\path\to\custom-data"
-python backend/app.py
+python backend\app.py --once fetch
+python backend\app.py --once weekly-report
 ```
 
-## 6. 編輯器設定
+Swagger UI：
 
-- 推薦 VS Code + Python + ESLint + Prettier 擴充。
-- 格式化：`npm run format`
-- 檢查：`npm run format:check`
-- TS strict mode 已開（見 [tsconfig.json](../../tsconfig.json)）。
+```text
+http://127.0.0.1:8765/docs
+```
 
-## 7. 常用指令速查
+## 5. 資料目錄
 
-| 指令 | 功能 |
-| --- | --- |
-| `npm run build:ts` | 只編譯 TS |
-| `npm run dev` | 編譯 + 啟動 Electron |
-| `npm run pack:backend` | 用 PyInstaller 打 backend |
-| `npm run pack` | dev pack（不建安裝檔） |
-| `npm run dist` | 完整 release（含 NSIS） |
-| `npm run format` | Prettier 格式化 |
+開發模式預設資料目錄是：
+
+```text
+backend/data/
+```
+
+你也可以用環境變數覆寫：
+
+```powershell
+$env:GITLAB_TRACKER_DATA_DIR = "D:\path\to\tracker-data"
+python backend\app.py
+```
+
+## 6. 常用 scripts
+
+| 指令                   | 用途                                                 |
+| ---------------------- | ---------------------------------------------------- |
+| `npm run build:ts`     | 編譯 `src/**/*.ts` 與 `frontend/**/*.ts` 到 `dist/`  |
+| `npm run dev`          | 編譯並啟動 Electron                                  |
+| `npm run pack:backend` | 用 PyInstaller 打包後端                              |
+| `npm run pack`         | 產生 unpacked Electron 內容                          |
+| `npm run dist`         | 產生正式 release 安裝檔                              |
+| `npm run format`       | 格式化 md / json / ts / html / css 與 backend Python |
+| `npm run format:check` | 格式檢查                                             |
+
+## 7. 首次驗證清單
+
+1. 在 `Connections` 頁面填入 GitLab 與 Gemini 設定
+2. 點 `Sync Now`
+3. 確認 `Dashboard` 有資料
+4. 確認 `Issue Arrange` 能 preview 一筆 Issue URL
+5. 確認能打開 `AI Chat` 或產生 `AI 摘要`

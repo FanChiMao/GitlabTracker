@@ -1,68 +1,95 @@
 # User Flow
 
-逐步說明每個使用者操作的步驟與對應 API。前端入口都在 [renderer/index.html](../../renderer/index.html) + [renderer/app.ts](../../renderer/app.ts)。
+這份文件從使用者視角描述目前 UI 的主要操作路徑。
 
-## 1. 設定 GitLab 連線
+## 1. 首次啟動
 
-| 步驟 | UI 元素 | 行為 |
-| --- | --- | --- |
-| 1 | 側邊欄「GitLab 設定」 | 預設展開 |
-| 2 | 輸入 `GitLab Base URL`、`Private Token`、`Project Path / ID` | `<input id="gitlab-url">` 等 |
-| 3 | （選填）輸入 `Gemini API Key` | 啟用 AI 功能 |
-| 4 | 設定每日同步 / 週五週報時間與開關 | `time` input |
-| 5 | 按「儲存設定」 | `POST /api/config`，若 `project_ref` 改變會清空 cache |
-| 6 | 按「立即同步」 | `POST /api/fetch`，成功後刷新 Dashboard |
+1. 開啟 App
+2. 進入 `Connections`
+3. 輸入 GitLab 與 Gemini 設定
+4. 儲存後按 `Sync Now`
 
-## 2. 瀏覽 Dashboard
+如果只想驗證畫面，也可以先用 `Import JSON` 載入既有 Issue 資料。
 
-| 步驟 | 動作 |
-| --- | --- |
-| 1 | 啟動 App 自動載入 `GET /api/dashboard` + `/api/issues` |
-| 2 | 看到 4 個 KPI 卡（本週新增 / 更新 / 開啟中 / 風險） |
-| 3 | 「近期更新 Issue」可調整「近 N 小時」視窗 |
-| 4 | 「本週新增」「重點推進」「風險」「模組分佈」分區呈現 |
-| 5 | 點任意 Issue 列開啟右側抽屜（含描述、Discussions、MR、Linked Issues） |
+## 2. Dashboard 主流程
 
-## 3. 切換到 Analytics
+`Dashboard` 是預設首頁，包含四個 tab：
 
-| 步驟 | 動作 |
-| --- | --- |
-| 1 | 點上方 Tab「分析」 |
-| 2 | 觸發 `GET /api/analytics`（首次切換才呼叫，之後快取） |
-| 3 | 看到：Burndown 圖（per milestone） / Workload 表 / Label 分佈 / Lifecycle / Delivery follow-ups |
+- `Dashboard`
+  - 週摘要 KPI
+  - 最近更新
+  - 本週新增
+  - Focus progress
+  - 風險與到期提醒
+- `Analytics`
+  - Burndown
+  - Workload
+  - Label distribution
+  - Milestone progress
+  - Lifecycle
+- `Timeline`
+  - Gantt / Calendar
+  - milestone / assignee / module 分組
+  - 月 / 週視圖
+- `Table`
+  - 搜尋、狀態、milestone、label、日期篩選
+  - 欄位排序
 
-## 4. Issue 抽屜內 AI 摘要
+## 3. 單一 Issue 查看
 
-| 步驟 | 動作 | API |
-| --- | --- | --- |
-| 1 | 在抽屜按「AI 摘要討論」 | — |
-| 2 | UI 顯示 loading | `POST /api/issues/{iid}/discussions/summary` |
-| 3 | 後端從 GitLab 抓 discussions → 組 prompt → 呼叫 Gemini → 解析 JSON | — |
-| 4 | 顯示條列摘要（討論重點 / 決議事項 / 待釐清） | — |
+使用者從列表點進單一 Issue 後，會打開 overlay：
 
-> 若沒設 `gemini_api_key` 會回 400，前端顯示提示。
+- 查看 Issue 基本資訊與 labels
+- 查看 linked MR 與 linked issues
+- 查看完整 discussion
+- 點 `AI 摘要` 生成討論摘要
+- 點 GitLab 連結時，Electron 會先詢問要用哪個外部瀏覽器開啟
 
-## 5. AI Chat 問答
+## 4. AI Chat
 
-| 步驟 | 動作 |
-| --- | --- |
-| 1 | 點 Tab「AI 助理」（或 dashboard 上的對話按鈕） |
-| 2 | 輸入問題（例：「Bob 這週有哪幾張開啟中的 Issue？」） |
-| 3 | 前端把最近 10 筆對話 + 新問題打包送 `POST /api/chat` |
-| 4 | 後端組「Issue 列表 context + 系統指令」→ 呼叫 Gemini → 回傳 `answer` |
-| 5 | UI 顯示回答；引用的 `#42` 文字會被前端轉成可點擊連結 |
+右下角浮動按鈕可開啟 `AI Issue Chat`：
 
-## 6. 產生 / 匯出週報
+- 問題會根據目前快取的所有 Issue 回答
+- 聊天歷史會帶到下一輪請求
+- 回答應該用 `#IID` 引用 Issue
+- 如果沒有同步資料或沒有 Gemini API Key，後端會拒絕請求
 
-| 步驟 | 動作 | API |
-| --- | --- | --- |
-| 1 | 側欄按「立即產生週報」 | `POST /api/report/weekly` |
-| 2 | 後端寫 `reports/weekly_report_*.md` 並回傳 path | — |
-| 3 | 按「開啟最新週報」 | `ipcRenderer.invoke('shell:openPath', path)` |
-| 4 | 按「匯出 PDF 報告」 | `GET /api/report/html` → `ipc report:exportPdf` |
-| 5 | 系統顯示「另存新檔」 → 寫入 PDF → 自動開啟 | — |
+## 5. Issue Arrange
 
-## 7. 縮放與外部連結
+這是本次重點更新的工作區。
 
-- `Ctrl +` / `Ctrl -` / `Ctrl 0`：縮放（0.8x – 1.6x）。
-- 點擊任一 GitLab 連結 → 跳出對話框「Chrome / Edge / 預設瀏覽器 / 取消」，可勾選「記住選擇」存到 `external-link-preferences.json`。
+### 入口資料
+
+- 多個 GitLab Issue URL
+- 一個 GitLab filter URL
+
+### 主要互動
+
+1. `Preview`
+   - 驗證 URL
+   - 展開 filter URL
+   - 產生可處理 Issue 清單
+2. 編輯 prompt
+   - 使用內建 prompt
+   - 儲存為 local prompt template
+3. 執行
+   - 單筆處理
+   - 批次處理
+   - 只 scrape
+   - 只跑 LLM
+4. 檢視結果
+   - 左側看 raw issue text
+   - 右側看 LLM 結果
+5. 匯出
+   - Excel
+   - 歷史紀錄重開與預覽
+
+## 6. Preferences
+
+`Preferences` 目前可調整：
+
+- 淺色 / 深色主題
+- UI 縮放
+- Gemini model 清單
+
+部分偏好會存在瀏覽器 localStorage，而不是後端 `config.json`。
