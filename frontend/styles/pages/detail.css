@@ -502,6 +502,20 @@
 .note-body li {
   margin-bottom: 5px;
 }
+.note-body li.discussion-md-task {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  list-style: none;
+  margin-left: -18px;
+}
+.note-body li.discussion-md-task input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+.note-body li.discussion-md-task span {
+  flex: 1;
+}
 .note-body code {
   padding: 2px 6px;
   border-radius: 8px;
@@ -524,6 +538,69 @@
   background: transparent;
   color: var(--text-primary);
   white-space: pre-wrap;
+}
+.note-body .discussion-md-table-wrap {
+  margin: 10px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+}
+.note-body .discussion-md-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 420px;
+}
+.note-body .discussion-md-table th,
+.note-body .discussion-md-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-glass);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  text-align: left;
+  vertical-align: top;
+}
+.note-body .discussion-md-table th:last-child,
+.note-body .discussion-md-table td:last-child {
+  border-right: 0;
+}
+.note-body .discussion-md-table thead th {
+  background: rgba(124, 156, 255, 0.08);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.note-body .discussion-md-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.note-body .discussion-md-details {
+  margin: 10px 0;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+.note-body .discussion-md-details summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(124, 156, 255, 0.06);
+  list-style: none;
+}
+.note-body .discussion-md-details summary::-webkit-details-marker {
+  display: none;
+}
+.note-body .discussion-md-details summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 8px;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.note-body .discussion-md-details[open] summary::before {
+  transform: rotate(90deg);
+}
+.note-body .discussion-md-details-body {
+  padding: 12px;
+  border-top: 1px solid var(--border-glass);
 }
 .note-body blockquote {
   margin: 10px 0;
