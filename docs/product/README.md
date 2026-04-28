@@ -1,18 +1,20 @@
 # Product
 
-本資料夾收錄產品定義與流程文件。
+這一區說明 Gitlab Tracker 現在解決的問題、主要使用者，以及使用者如何在 UI 中完成同步、分析、Issue 整理與報表輸出。
 
-| 文件 | 說明 |
-| --- | --- |
-| [PRD.md](PRD.md) | 產品需求文件（Problem / Persona / Feature 清單 / 範圍） |
-| [project-flow.md](project-flow.md) | 從「使用者建立 GitLab Project」到「Tracker 產生週報」的端到端業務流程 |
-| [user-flow.md](user-flow.md) | 使用者操作流程（每個主要頁面 / 動作的步驟） |
+## 文件導覽
 
-## 快速摘要
+| 文件                               | 內容                                                        |
+| ---------------------------------- | ----------------------------------------------------------- |
+| [PRD.md](PRD.md)                   | 問題定義、目標使用者、功能範圍與優先級                      |
+| [project-flow.md](project-flow.md) | 從 GitLab 專案同步到週報產出的端到端工作流程                |
+| [user-flow.md](user-flow.md)       | 以畫面與操作為主的使用流程，包含 Dashboard 與 Issue Arrange |
 
-Gitlab Tracker 解決「PM / Tech Lead 每週要手動爬 GitLab Issue 寫週報」的痛點，提供：
+## 目前產品定位
 
-1. 每日定時把 GitLab Issue 拉回本地。
-2. 一個儀表板 + 多個分析視圖（Burndown / Workload / Lifecycle）。
-3. 每週五自動產生 Markdown / HTML 週報，可匯出 PDF。
-4. AI 助理：對 Issue 討論串做摘要、用自然語言問答 Issue 狀態。
+Gitlab Tracker 的核心價值是把「專案追蹤」和「Issue 整理」放在同一個桌面工具中：
+
+- 同步 GitLab Issue 後，快速看到風險、進度與工作量。
+- 打開單一 Issue 時，可以同時看 discussions、相關 MR、linked issues 與 AI 摘要。
+- 需要對外整理時，可以直接把多個 Issue 或一個 GitLab filter 丟進 Issue Arrange 工作區，批次生成可分享的整理結果。
+- 最後再輸出週報、HTML 或 PDF，不必在多個工具之間切換。
