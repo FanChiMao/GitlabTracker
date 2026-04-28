@@ -472,8 +472,81 @@
 }
 .note-body {
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.7;
   color: var(--text-secondary);
-  white-space: pre-wrap;
   word-break: break-word;
+}
+.note-body strong {
+  color: var(--text-primary);
+}
+.note-body h2,
+.note-body h3,
+.note-body h4 {
+  margin: 10px 0 6px;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+.note-body h2 {
+  font-size: 15px;
+}
+.note-body h3 {
+  font-size: 14px;
+}
+.note-body h4 {
+  font-size: 13px;
+}
+.note-body ul {
+  margin: 8px 0 10px 18px;
+  padding: 0;
+}
+.note-body li {
+  margin-bottom: 5px;
+}
+.note-body code {
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(124, 156, 255, 0.08);
+  color: var(--blue-400);
+  font-family: 'IBM Plex Mono', 'Noto Sans TC', monospace;
+  font-size: 12px;
+}
+.note-body .discussion-md-code {
+  margin: 10px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  background: rgba(8, 12, 24, 0.45);
+  overflow: auto;
+}
+.note-body .discussion-md-code code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+.note-body blockquote {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-left: 3px solid rgba(124, 156, 255, 0.4);
+  background: rgba(124, 156, 255, 0.06);
+  border-radius: 0 10px 10px 0;
+  color: var(--text-secondary);
+}
+.note-body .discussion-md-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(124, 156, 255, 0.3);
+  text-underline-offset: 2px;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    text-decoration-color var(--duration-fast) var(--ease-out);
+}
+.note-body .discussion-md-link:hover {
+  color: #a9c0ff;
+  text-decoration-color: rgba(169, 192, 255, 0.82);
+}
+.note-body .discussion-md-image-link {
+  display: inline-flex;
+  margin: 4px 0;
 }
