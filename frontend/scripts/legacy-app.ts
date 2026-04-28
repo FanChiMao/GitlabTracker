@@ -3279,6 +3279,61 @@ function formatArrangeHistoryMarkdown(text: string): string {
   return escaped;
 }
 
+function toSafeHref(url: string): string {
+  const trimmed = (url || '').trim();
+  const normalized = trimmed.toLowerCase();
+  if (
+    normalized.startsWith('http://') ||
+    normalized.startsWith('https://') ||
+    normalized.startsWith('mailto:') ||
+    normalized.startsWith('/') ||
+    normalized.startsWith('./') ||
+    normalized.startsWith('../') ||
+    normalized.startsWith('#')
+  ) {
+    return trimmed;
+  }
+  return '#';
+}
+
+function formatDiscussionMarkdown(text: string): string {
+  const normalized = (text || '').replace(/\r\n/g, '\n');
+  const codeBlocks: string[] = [];
+  let escaped = escapeHtml(normalized).replace(/```([\s\S]*?)```/g, (_match, code) => {
+    const placeholder = `@@DISCUSSION_CODE_${codeBlocks.length}@@`;
+    codeBlocks.push(`<pre class="discussion-md-code"><code>${code.trim()}</code></pre>`);
+    return placeholder;
+  });
+
+  escaped = escaped
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt, url) => {
+      const safeHref = escapeHtml(toSafeHref(url));
+      const safeAlt = alt.trim() ? escapeHtml(alt.trim()) : '附件圖片';
+      return `<a class="discussion-md-link discussion-md-image-link" href="${safeHref}" target="_blank" rel="noreferrer">${safeAlt}</a>`;
+    })
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, url) => {
+      const safeHref = escapeHtml(toSafeHref(url));
+      return `<a class="discussion-md-link" href="${safeHref}" target="_blank" rel="noreferrer">${label}</a>`;
+    })
+    .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/^(\d+)\. (.+)$/gm, '<li><strong>$1.</strong> $2</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`)
+    .replace(/\n{2,}/g, '<br/><br/>')
+    .replace(/\n/g, '<br/>');
+
+  codeBlocks.forEach((block, index) => {
+    escaped = escaped.replace(`@@DISCUSSION_CODE_${index}@@`, block);
+  });
+
+  return escaped;
+}
+
 function renderArrangeHistoryPreview(selectedFile: ArrangeHistoryFile | null): void {
   const previewTitle = byId<HTMLElement>('arrange-history-preview-title');
   const rawPreview = byId<HTMLElement>('arrange-history-preview');
@@ -4592,7 +4647,7 @@ function renderDiscussions(target: HTMLDivElement, discussions: Discussion[]): v
                   <span class="note-username">@${escapeHtml(note.author_username)}</span>
                   <time class="note-time">${fmtDate(note.created_at)}</time>
                 </div>
-                <div class="note-body">${escapeHtml(note.body)}</div>
+                <div class="note-body">${formatDiscussionMarkdown(note.body)}</div>
               </div>
             </div>
           `,
