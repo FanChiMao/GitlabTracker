@@ -1,6 +1,6 @@
 {
   "name": "gitlab-tracker",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "GitLab issue tracking and weekly reporting.",
   "main": "dist/src/main.js",
   "author": "OpenAI",
@@ -49,6 +49,11 @@
     },
     "nsis": {
       "deleteAppDataOnUninstall": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "FanChiMao",
+      "repo": "Gitlab Tracker"
     }
   },
   "dependencies": {

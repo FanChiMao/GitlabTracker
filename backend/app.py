@@ -83,6 +83,10 @@ class ArrangeExportPayload(BaseModel):
     urls: list[str] = []
 
 
+class IssueUrlPayload(BaseModel):
+    url: str = ""
+
+
 class AppState:
     scheduler: TrackerScheduler | None = None
 
@@ -164,6 +168,48 @@ def load_issue_bundle_from_url(url: str) -> tuple[dict[str, Any], list[dict[str,
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return issue, discussions
+
+
+def load_issue_detail_bundle_from_url(url: str) -> dict[str, Any]:
+    from core.report_service import simplify_issue
+
+    base_url, project_ref, issue_iid = parse_issue_url(url)
+    client = ensure_gitlab_client(base_url)
+    try:
+        issue = client.fetch_issue(project_ref, issue_iid)
+        discussions = client.fetch_issue_discussions(project_ref, issue_iid)
+        try:
+            merge_requests = client.fetch_issue_related_merge_requests(
+                project_ref, issue_iid
+            )
+        except requests.exceptions.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                merge_requests = []
+            else:
+                raise
+
+        try:
+            links = client.fetch_issue_links(project_ref, issue_iid)
+        except requests.exceptions.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                links = []
+            else:
+                raise
+    except requests.exceptions.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else 502
+        detail = exc.response.text[:500] if exc.response is not None else str(exc)
+        raise HTTPException(status_code=status, detail=detail) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {
+        "issue": simplify_issue(issue),
+        "discussions": discussions,
+        "merge_requests": merge_requests,
+        "links": links,
+        "project_ref": project_ref,
+        "source_url": url,
+    }
 
 
 def resolve_filter_issues(filter_url: str) -> list[dict[str, Any]]:
@@ -665,6 +711,14 @@ def get_issues() -> list[dict[str, Any]]:
     from core.report_service import simplify_issue
 
     return [simplify_issue(issue) for issue in read_issues()]
+
+
+@app.post("/api/issues/detail-by-url")
+def get_issue_detail_by_url(payload: IssueUrlPayload) -> dict[str, Any]:
+    url = payload.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="Please provide an issue URL.")
+    return load_issue_detail_bundle_from_url(url)
 
 
 @app.get("/api/issues/{iid}/discussions")

@@ -128,6 +128,15 @@ type LinkedItemInfo = {
   issue: LinkedIssueRef;
 };
 
+type IssueDetailBundle = {
+  issue: IssueItem;
+  discussions: Discussion[];
+  merge_requests: MergeRequestInfo[];
+  links: LinkedItemInfo[];
+  project_ref?: string;
+  source_url?: string;
+};
+
 type BurndownPoint = {
   date: string;
   open: number;
@@ -3003,6 +3012,39 @@ function toArrangeJob(issue: ArrangePreviewIssue): ArrangeJob {
   };
 }
 
+function toIssueItemFromArrangeJob(job: ArrangeJob): IssueItem {
+  return {
+    iid: job.iid,
+    title: job.title,
+    state: job.state,
+    module: null,
+    labels: [...job.labels],
+    assignees: [...job.assignees],
+    assignee_details: job.assignees.map((name) => ({
+      name,
+      username: null,
+      avatar_url: null,
+    })),
+    milestone: job.milestone?.title ?? null,
+    milestone_start_date: null,
+    milestone_due_date: job.milestone?.due_date ?? null,
+    created_at: null,
+    updated_at: null,
+    closed_at: null,
+    due_date: job.milestone?.due_date ?? null,
+    web_url: job.web_url ?? null,
+    issue_type: null,
+    merge_requests_count: 0,
+    blocking_issues_count: 0,
+    task_total: 0,
+    task_completed: 0,
+    user_notes_count: 0,
+    has_new_discussions: false,
+    note: null,
+    reason: null,
+  };
+}
+
 function getArrangeStatusLabel(status: ArrangeJobStatus): string {
   switch (status) {
     case 'running':
@@ -3049,7 +3091,7 @@ function renderArrangeJobs(): void {
       const phaseBadge = (label: string, status: ArrangePhaseStatus) =>
         `<span class="arrange-phase ${status}"><span class="dot"></span>${label}: ${getArrangePhaseLabel(status)}</span>`;
       return `
-        <article class="arrange-job-card ${state.selectedArrangeJobId === job.id ? 'active' : ''}" data-arrange-job-id="${escapeHtml(job.id)}">
+        <article class="arrange-job-card ${state.selectedArrangeJobId === job.id ? 'active' : ''}" data-arrange-job-id="${escapeHtml(job.id)}" title="點擊切換目前處理的 Issue">
           <div class="arrange-job-top">
             <div>
               <div class="arrange-job-title">#${job.iid} ${escapeHtml(job.title)}</div>
@@ -3059,7 +3101,17 @@ function renderArrangeJobs(): void {
                 <span>${escapeHtml(milestone)}</span>
               </div>
             </div>
-            <span class="arrange-job-status ${job.status}">${getArrangeStatusLabel(job.status)}</span>
+            <div class="arrange-job-actions">
+              <span class="arrange-job-status ${job.status}">${getArrangeStatusLabel(job.status)}</span>
+              <button
+                type="button"
+                class="arrange-job-detail-btn"
+                data-arrange-job-detail="${escapeHtml(job.id)}"
+                title="查看 GitLab Issue 詳細資訊"
+              >
+                查看詳情
+              </button>
+            </div>
           </div>
           <div class="arrange-job-phases">
             ${phaseBadge('Scrape', job.scrapeStatus)}
@@ -3076,6 +3128,30 @@ function renderArrangeJobs(): void {
 function getSelectedArrangeJob(): ArrangeJob | null {
   if (!state.selectedArrangeJobId) return null;
   return state.arrangeJobs.find((job) => job.id === state.selectedArrangeJobId) ?? null;
+}
+
+async function openArrangeJobDetail(jobId: string): Promise<void> {
+  const job = state.arrangeJobs.find((item) => item.id === jobId);
+  if (!job) return;
+
+  const matchedIssue = job.web_url
+    ? state.allIssues.find((item) => item.web_url === job.web_url)
+    : state.allIssues.find((item) => item.iid === job.iid);
+
+  if (matchedIssue) {
+    openIssueDetail(matchedIssue);
+    return;
+  }
+
+  if (!job.web_url) {
+    openIssueDetail(toIssueItemFromArrangeJob(job));
+    return;
+  }
+
+  const bundle = await api<IssueDetailBundle>('/api/issues/detail-by-url', 'POST', {
+    url: job.web_url,
+  });
+  openIssueDetailWithBundle(bundle);
 }
 
 function renderArrangeSelection(): void {
@@ -4358,10 +4434,13 @@ async function syncNow(): Promise<void> {
   }
 }
 
-function renderIssueDeliverySummary(issue: IssueItem): void {
+function renderIssueDeliverySummary(
+  issue: IssueItem,
+  overrides?: { linkedCount?: number; mergeRequestCount?: number },
+): void {
   const container = byId<HTMLDivElement>('detail-delivery');
-  const linkedCount = getLinkedItemCount(issue);
-  const mergeRequestCount = getResolvedMergeRequestCount(issue);
+  const linkedCount = overrides?.linkedCount ?? getLinkedItemCount(issue);
+  const mergeRequestCount = overrides?.mergeRequestCount ?? getResolvedMergeRequestCount(issue);
   const highlight = getDeliveryHighlight(issue);
   const dueDate = startOfDay(issue.due_date);
   const isOverdue =
@@ -4410,6 +4489,46 @@ function renderIssueDeliverySummary(issue: IssueItem): void {
     </div>
     ${chips ? `<div class="detail-delivery-progress"><div class="detail-chip-row">${chips}</div></div>` : ''}
   `;
+}
+
+function renderDiscussions(target: HTMLDivElement, discussions: Discussion[]): void {
+  const nonEmpty = discussions.filter((discussion) => discussion.notes.length > 0);
+  if (!nonEmpty.length) {
+    target.innerHTML = '<div class="empty-state">此 Issue 尚無討論留言。</div>';
+    return;
+  }
+  target.innerHTML = nonEmpty
+    .map((discussion) => {
+      const isThread = discussion.notes.length > 1;
+      return `
+        <div class="discussion-thread ${isThread ? 'has-replies' : ''}">
+          ${discussion.notes
+            .map(
+              (note, index) => `
+            <div class="discussion-note ${index > 0 ? 'reply' : 'root'}">
+              <div class="note-avatar" title="${escapeHtml(note.author_name)}">
+                ${
+                  note.author_avatar_url
+                    ? `<img src="${escapeHtml(note.author_avatar_url)}" alt="" />`
+                    : `<span>${escapeHtml(note.author_name.charAt(0).toUpperCase())}</span>`
+                }
+              </div>
+              <div class="note-content">
+                <div class="note-header">
+                  <strong class="note-author">${escapeHtml(note.author_name)}</strong>
+                  <span class="note-username">@${escapeHtml(note.author_username)}</span>
+                  <time class="note-time">${fmtDate(note.created_at)}</time>
+                </div>
+                <div class="note-body">${escapeHtml(note.body)}</div>
+              </div>
+            </div>
+          `,
+            )
+            .join('')}
+        </div>
+      `;
+    })
+    .join('');
 }
 
 function renderMergeRequests(target: HTMLDivElement, mergeRequests: MergeRequestInfo[]): void {
@@ -4500,6 +4619,75 @@ async function loadIssueRelations(issue: IssueItem): Promise<void> {
   renderIssueDeliverySummary(issue);
 }
 
+function prepareIssueDetailOverlay(issue: IssueItem): {
+  discussionsDiv: HTMLDivElement;
+  mergeTarget: HTMLDivElement;
+  linksTarget: HTMLDivElement;
+  summaryBtn: HTMLButtonElement;
+  summaryBox: HTMLDivElement;
+} {
+  const overlay = byId<HTMLDivElement>('issue-detail-overlay');
+  byId<HTMLElement>('detail-iid').textContent = `#${issue.iid}`;
+
+  const stateBadge = byId<HTMLElement>('detail-state');
+  stateBadge.textContent = issue.state === 'opened' ? '開啟中' : '已關閉';
+  stateBadge.className = `state-badge ${issue.state}`;
+
+  byId<HTMLElement>('detail-title').textContent = issue.title;
+  byId<HTMLElement>('detail-assignees').textContent = (issue.assignees || []).join(', ') || '-';
+  byId<HTMLElement>('detail-milestone').textContent = issue.milestone ?? '-';
+  byId<HTMLElement>('detail-module').textContent = issue.module ?? '-';
+  byId<HTMLElement>('detail-created').textContent = fmtDate(issue.created_at);
+  byId<HTMLElement>('detail-updated').textContent = fmtDate(issue.updated_at);
+  byId<HTMLElement>('detail-due').textContent = issue.due_date ? fmtDate(issue.due_date) : '-';
+
+  const labelsDiv = byId<HTMLDivElement>('detail-labels');
+  labelsDiv.innerHTML = (issue.labels || [])
+    .map((label) => `<span class="tag">${escapeHtml(label)}</span>`)
+    .join('');
+
+  const link = byId<HTMLAnchorElement>('detail-link');
+  if (issue.web_url) {
+    link.href = issue.web_url;
+    link.style.display = '';
+  } else {
+    link.style.display = 'none';
+  }
+
+  const discussionsDiv = byId<HTMLDivElement>('detail-discussions');
+  const mergeTarget = byId<HTMLDivElement>('detail-merge-requests');
+  const linksTarget = byId<HTMLDivElement>('detail-linked-items');
+  const summaryBtn = byId<HTMLButtonElement>('btn-ai-summary');
+  const summaryBox = byId<HTMLDivElement>('ai-summary-box');
+  summaryBox.style.display = 'none';
+  summaryBox.innerHTML = '';
+
+  overlay.classList.add('open');
+  document.body.classList.add('detail-open');
+  document.body.style.overflow = 'hidden';
+
+  return { discussionsDiv, mergeTarget, linksTarget, summaryBtn, summaryBox };
+}
+
+function wireIssueSummaryButton(
+  summaryBtn: HTMLButtonElement,
+  summaryBox: HTMLDivElement,
+  options: { iid?: number; enabled?: boolean; disabledTitle?: string },
+): void {
+  const newBtn = summaryBtn.cloneNode(true) as HTMLButtonElement;
+  summaryBtn.replaceWith(newBtn);
+
+  if (options.enabled === false || options.iid == null) {
+    newBtn.disabled = true;
+    newBtn.title = options.disabledTitle || '此 Issue 目前無法使用 AI 摘要。';
+    return;
+  }
+
+  newBtn.disabled = false;
+  newBtn.title = '使用 AI 摘要';
+  newBtn.addEventListener('click', () => loadAISummary(options.iid as number, newBtn, summaryBox));
+}
+
 function requestIssueLinkDataForVisibleIssues(issues: IssueItem[]): void {
   const issuesForLinks = issues
     .filter(
@@ -4564,54 +4752,30 @@ function requestIssueLinkDataForVisibleIssues(issues: IssueItem[]): void {
    ISSUE DETAIL PANEL
    ══════════════════════════════════════════════ */
 function openIssueDetail(issue: IssueItem): void {
-  const overlay = byId<HTMLDivElement>('issue-detail-overlay');
-  byId<HTMLElement>('detail-iid').textContent = `#${issue.iid}`;
-
-  const stateBadge = byId<HTMLElement>('detail-state');
-  stateBadge.textContent = issue.state === 'opened' ? '開啟中' : '已關閉';
-  stateBadge.className = `state-badge ${issue.state}`;
-
-  byId<HTMLElement>('detail-title').textContent = issue.title;
-  byId<HTMLElement>('detail-assignees').textContent = (issue.assignees || []).join(', ') || '-';
-  byId<HTMLElement>('detail-milestone').textContent = issue.milestone ?? '-';
-  byId<HTMLElement>('detail-module').textContent = issue.module ?? '-';
-  byId<HTMLElement>('detail-created').textContent = fmtDate(issue.created_at);
-  byId<HTMLElement>('detail-updated').textContent = fmtDate(issue.updated_at);
-  byId<HTMLElement>('detail-due').textContent = issue.due_date ? fmtDate(issue.due_date) : '-';
-
-  const labelsDiv = byId<HTMLDivElement>('detail-labels');
-  labelsDiv.innerHTML = (issue.labels || [])
-    .map((l) => `<span class="tag">${escapeHtml(l)}</span>`)
-    .join('');
+  const { discussionsDiv, summaryBtn, summaryBox } = prepareIssueDetailOverlay(issue);
   renderIssueDeliverySummary(issue);
-
-  const link = byId<HTMLAnchorElement>('detail-link');
-  if (issue.web_url) {
-    link.href = issue.web_url;
-    link.style.display = '';
-  } else {
-    link.style.display = 'none';
-  }
-
-  const discussionsDiv = byId<HTMLDivElement>('detail-discussions');
   discussionsDiv.innerHTML = '<div class="empty-state">載入討論中...</div>';
-
-  overlay.classList.add('open');
-  document.body.classList.add('detail-open');
-  document.body.style.overflow = 'hidden';
-
-  // Fetch discussions
-  loadDiscussions(issue.iid, discussionsDiv);
+  void loadDiscussions(issue.iid, discussionsDiv);
   void loadIssueRelations(issue);
+  wireIssueSummaryButton(summaryBtn, summaryBox, { iid: issue.iid });
+}
 
-  // Wire AI summary button
-  const summaryBtn = byId<HTMLButtonElement>('btn-ai-summary');
-  const summaryBox = byId<HTMLDivElement>('ai-summary-box');
-  summaryBox.style.display = 'none';
-  summaryBox.innerHTML = '';
-  const newBtn = summaryBtn.cloneNode(true) as HTMLButtonElement;
-  summaryBtn.replaceWith(newBtn);
-  newBtn.addEventListener('click', () => loadAISummary(issue.iid, newBtn, summaryBox));
+function openIssueDetailWithBundle(bundle: IssueDetailBundle): void {
+  const { issue, discussions, merge_requests, links } = bundle;
+  const { discussionsDiv, mergeTarget, linksTarget, summaryBtn, summaryBox } =
+    prepareIssueDetailOverlay(issue);
+
+  renderDiscussions(discussionsDiv, discussions);
+  renderMergeRequests(mergeTarget, merge_requests);
+  renderLinkedItems(linksTarget, links);
+  renderIssueDeliverySummary(issue, {
+    linkedCount: links.length,
+    mergeRequestCount: merge_requests.length,
+  });
+  wireIssueSummaryButton(summaryBtn, summaryBox, {
+    enabled: false,
+    disabledTitle: 'AI 摘要目前僅支援目前設定專案的 Issue。',
+  });
 }
 
 function closeIssueDetail(): void {
@@ -4657,43 +4821,7 @@ function formatSummaryMarkdown(text: string): string {
 async function loadDiscussions(iid: number, container: HTMLDivElement): Promise<void> {
   try {
     const discussions = await api<Discussion[]>(`/api/issues/${iid}/discussions`);
-    const nonEmpty = discussions.filter((d) => d.notes.length > 0);
-    if (!nonEmpty.length) {
-      container.innerHTML = '<div class="empty-state">此 Issue 尚無討論留言。</div>';
-      return;
-    }
-    container.innerHTML = nonEmpty
-      .map((disc) => {
-        const isThread = disc.notes.length > 1;
-        return `
-        <div class="discussion-thread ${isThread ? 'has-replies' : ''}">
-          ${disc.notes
-            .map(
-              (note, idx) => `
-            <div class="discussion-note ${idx > 0 ? 'reply' : 'root'}">
-              <div class="note-avatar" title="${escapeHtml(note.author_name)}">
-                ${
-                  note.author_avatar_url
-                    ? `<img src="${escapeHtml(note.author_avatar_url)}" alt="" />`
-                    : `<span>${escapeHtml(note.author_name.charAt(0).toUpperCase())}</span>`
-                }
-              </div>
-              <div class="note-content">
-                <div class="note-header">
-                  <strong class="note-author">${escapeHtml(note.author_name)}</strong>
-                  <span class="note-username">@${escapeHtml(note.author_username)}</span>
-                  <time class="note-time">${fmtDate(note.created_at)}</time>
-                </div>
-                <div class="note-body">${escapeHtml(note.body)}</div>
-              </div>
-            </div>
-          `,
-            )
-            .join('')}
-        </div>
-      `;
-      })
-      .join('');
+    renderDiscussions(container, discussions);
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('401') || msg.includes('invalid_token') || msg.includes('revoked')) {
@@ -5159,6 +5287,18 @@ function wireEvents(): void {
       const iid = Number(row.dataset.iid);
       const issue = state.allIssues.find((i) => i.iid === iid);
       if (issue) openIssueDetail(issue);
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    const detailButton = (e.target as HTMLElement).closest(
+      '[data-arrange-job-detail]',
+    ) as HTMLElement | null;
+    const detailJobId = detailButton?.dataset.arrangeJobDetail;
+    if (detailJobId) {
+      selectArrangeJob(detailJobId);
+      void openArrangeJobDetail(detailJobId).catch(handleError);
+      return;
     }
   });
 
