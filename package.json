@@ -53,7 +53,7 @@
     "publish": {
       "provider": "github",
       "owner": "FanChiMao",
-      "repo": "Gitlab Tracker"
+      "repo": "GitlabTracker"
     }
   },
   "dependencies": {
