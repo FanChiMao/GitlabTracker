@@ -198,6 +198,10 @@ body.detail-open .chat-fab {
   right: 560px;
 }
 
+body.detail-open .rag-status-badge {
+  right: 560px;
+}
+
 @media (max-width: 1380px) {
   body.detail-open .chat-panel.open {
     right: 548px;
@@ -206,6 +210,10 @@ body.detail-open .chat-fab {
   }
 
   body.detail-open .chat-fab {
+    right: 548px;
+  }
+
+  body.detail-open .rag-status-badge {
     right: 548px;
   }
 }
@@ -219,6 +227,11 @@ body.detail-open .chat-fab {
   }
 
   body.detail-open .chat-fab {
+    left: 24px;
+    right: auto;
+  }
+
+  body.detail-open .rag-status-badge {
     left: 24px;
     right: auto;
   }

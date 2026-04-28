@@ -7,6 +7,58 @@
   gemini_api_key: string;
 };
 
+type ChatSource = {
+  issue_iid: number;
+  chunk_id: string;
+  title: string;
+  score: number;
+  source_type: string;
+  discussion_id?: string | null;
+  note_ids?: number[];
+};
+
+type ChatResponse = {
+  answer: string;
+  model: string;
+  mode: 'rag' | 'issue_list';
+  sources: ChatSource[];
+};
+
+type RagRebuildJob = {
+  job_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  progress: number;
+  created_at: string;
+  updated_at: string;
+  issue_count: number;
+  indexed_issues: number;
+  skipped_issues: number;
+  chunk_count: number;
+  current_issue_iid?: number | null;
+  error?: string | null;
+  result?: {
+    built_at: string;
+    issue_count: number;
+    indexed_issues: number;
+    skipped_issues: number;
+    chunk_count: number;
+  } | null;
+};
+
+type RagIndexStatus = {
+  built_at: string | null;
+  issue_count: number;
+  indexed_issues: number;
+  skipped_issues: number;
+  chunk_count: number;
+};
+
+type DiscussionJumpTarget = {
+  issue_iid: number;
+  discussion_id?: string | null;
+  note_ids?: number[];
+};
+
 const MAX_PROJECT_REF_HISTORY = 10;
 const MIN_SIDEBAR_WIDTH = 248;
 const MAX_SIDEBAR_WIDTH = 360;
@@ -295,6 +347,16 @@ const state = {
   arrangeHistoryRootPath: '' as string,
   arrangeBatchRunning: false,
   arrangeBatchAbortController: null as AbortController | null,
+  ragUi: {
+    statusChecked: false,
+    hasUsableIndex: false,
+    rebuildFailedWithoutIndex: false,
+    rebuilding: false,
+    rebuildJobId: '',
+    rebuildProgress: 0,
+    rebuildStatusText: '',
+  },
+  pendingDiscussionJump: null as DiscussionJumpTarget | null,
 };
 
 /* ── Helpers ── */
@@ -4394,6 +4456,10 @@ async function saveConfig(): Promise<void> {
 async function loadAllIssues(): Promise<void> {
   const issues = await api<IssueItem[]>('/api/issues');
   state.allIssues = issues;
+  await refreshRagIndexAvailability();
+  if (state.allIssues.length > 0) {
+    void startRagRebuild();
+  }
   state.mergeRequestsByIid.clear();
   state.issueLinksByIid.clear();
   state.pendingMergeRequestLoads.clear();
@@ -4497,15 +4563,22 @@ function renderDiscussions(target: HTMLDivElement, discussions: Discussion[]): v
     target.innerHTML = '<div class="empty-state">此 Issue 尚無討論留言。</div>';
     return;
   }
+
   target.innerHTML = nonEmpty
     .map((discussion) => {
       const isThread = discussion.notes.length > 1;
       return `
-        <div class="discussion-thread ${isThread ? 'has-replies' : ''}">
+        <div
+          class="discussion-thread ${isThread ? 'has-replies' : ''}"
+          data-discussion-id="${escapeHtml(String(discussion.id || ''))}"
+        >
           ${discussion.notes
             .map(
               (note, index) => `
-            <div class="discussion-note ${index > 0 ? 'reply' : 'root'}">
+            <div
+              class="discussion-note ${index > 0 ? 'reply' : 'root'}"
+              data-note-id="${escapeHtml(String(note.id || ''))}"
+            >
               <div class="note-avatar" title="${escapeHtml(note.author_name)}">
                 ${
                   note.author_avatar_url
@@ -4529,6 +4602,54 @@ function renderDiscussions(target: HTMLDivElement, discussions: Discussion[]): v
       `;
     })
     .join('');
+
+  applyPendingDiscussionJump(target);
+}
+
+function applyPendingDiscussionJump(container: HTMLElement): void {
+  const jump = state.pendingDiscussionJump;
+  if (!jump) return;
+
+  const allNotes = Array.from(container.querySelectorAll<HTMLElement>('.discussion-note'));
+  const allThreads = Array.from(container.querySelectorAll<HTMLElement>('.discussion-thread'));
+
+  allNotes.forEach((el) => el.classList.remove('rag-evidence-hit'));
+  allThreads.forEach((el) => el.classList.remove('rag-evidence-hit'));
+
+  let targetEl: HTMLElement | null = null;
+
+  if (jump.note_ids?.length) {
+    for (const noteId of jump.note_ids) {
+      const noteEl = container.querySelector<HTMLElement>(
+        `.discussion-note[data-note-id="${noteId}"]`,
+      );
+      if (noteEl) {
+        noteEl.classList.add('rag-evidence-hit');
+        targetEl = targetEl || noteEl;
+      }
+    }
+  }
+
+  if (!targetEl && jump.discussion_id) {
+    const threadEl = container.querySelector<HTMLElement>(
+      `.discussion-thread[data-discussion-id="${jump.discussion_id}"]`,
+    );
+    if (threadEl) {
+      threadEl.classList.add('rag-evidence-hit');
+      targetEl = threadEl;
+    }
+  }
+
+  if (targetEl) {
+    targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => {
+      targetEl?.classList.remove('rag-evidence-hit');
+      allNotes.forEach((el) => el.classList.remove('rag-evidence-hit'));
+      allThreads.forEach((el) => el.classList.remove('rag-evidence-hit'));
+    }, 3500);
+  }
+
+  state.pendingDiscussionJump = null;
 }
 
 function renderMergeRequests(target: HTMLDivElement, mergeRequests: MergeRequestInfo[]): void {
@@ -4896,12 +5017,16 @@ function initChat(): void {
   fab.addEventListener('click', () => {
     panel.classList.add('open');
     fab.classList.add('hidden');
-    input.focus();
+    renderRagStatusBadge();
+    if (!input.disabled) {
+      input.focus();
+    }
   });
 
   closeBtn.addEventListener('click', () => {
     panel.classList.remove('open');
     fab.classList.remove('hidden');
+    renderRagStatusBadge();
   });
 
   clearBtn.addEventListener('click', () => {
@@ -4920,6 +5045,7 @@ function initChat(): void {
           </div>
         </div>`;
       wireSuggestionBtns(msgs);
+      renderRagQuestionState();
     }
   });
 
@@ -4931,9 +5057,9 @@ function initChat(): void {
     }
   });
 
-  // Wire suggestion buttons
   const msgs = document.getElementById('chat-messages');
   if (msgs) wireSuggestionBtns(msgs);
+  renderRagQuestionState();
 }
 
 function wireSuggestionBtns(container: HTMLElement): void {
@@ -4948,7 +5074,119 @@ function wireSuggestionBtns(container: HTMLElement): void {
   });
 }
 
+function isRagQuestionLocked(): boolean {
+  return !state.ragUi.hasUsableIndex && !state.ragUi.rebuildFailedWithoutIndex;
+}
+
+function getRagQuestionNotice(): {
+  tone: 'pending' | 'syncing' | 'fallback';
+  title: string;
+  body: string;
+} | null {
+  if (!state.ragUi.statusChecked) {
+    return {
+      tone: 'pending',
+      title: '知識索引準備中',
+      body: '正在確認 RAG 索引狀態，稍後就能開始提問。',
+    };
+  }
+
+  if (!state.ragUi.hasUsableIndex && state.ragUi.rebuildFailedWithoutIndex) {
+    return {
+      tone: 'fallback',
+      title: '索引暫時不可用',
+      body: '你仍可先提問，系統會先改用 Issue 清單回答。',
+    };
+  }
+
+  if (!state.ragUi.hasUsableIndex) {
+    return {
+      tone: 'pending',
+      title: state.ragUi.rebuilding ? '正在建立知識索引' : '知識索引準備中',
+      body: state.ragUi.rebuilding
+        ? `完成後即可提問，目前進度 ${Math.round(state.ragUi.rebuildProgress)}%。`
+        : '正在準備首次索引，完成後即可開始提問。',
+    };
+  }
+
+  if (state.ragUi.rebuilding) {
+    return {
+      tone: 'syncing',
+      title: '正在同步最新索引',
+      body: '你可以先繼續提問，回答會先依目前可用索引產生。',
+    };
+  }
+
+  return null;
+}
+
+function renderRagQuestionState(): void {
+  const panel = getById<HTMLElement>('chat-panel');
+  const notice = getById<HTMLElement>('chat-rag-state');
+  const input = getById<HTMLInputElement>('chat-input');
+  const sendBtn = getById<HTMLButtonElement>('chat-send');
+  if (!panel || !notice || !input || !sendBtn) return;
+
+  const locked = isRagQuestionLocked();
+  const hint = getRagQuestionNotice();
+  const isSending = sendBtn.dataset.busy === 'true';
+
+  panel.classList.toggle('chat-panel-rag-locked', locked);
+  notice.className = hint ? `chat-rag-state ${hint.tone} is-visible` : 'chat-rag-state';
+  notice.innerHTML = hint
+    ? `
+      <div class="chat-rag-state__card">
+        <strong>${escapeHtml(hint.title)}</strong>
+        <span>${escapeHtml(hint.body)}</span>
+      </div>`
+    : '';
+
+  input.disabled = locked;
+  input.placeholder = locked ? 'RAG 索引建立完成後即可提問' : '想問哪一筆 Issue、風險或進度？';
+  sendBtn.disabled = locked || isSending;
+
+  panel.querySelectorAll<HTMLButtonElement>('.chat-suggestion-btn').forEach((btn) => {
+    btn.disabled = locked;
+  });
+
+  if (locked && document.activeElement === input) {
+    input.blur();
+  }
+}
+
+function renderChatSources(sources?: ChatSource[]): string {
+  if (!sources?.length) return '';
+
+  const items = sources
+    .slice(0, 6)
+    .map((source, index) => {
+      const discussionId = source.discussion_id ? String(source.discussion_id) : '';
+      const noteIds = JSON.stringify(source.note_ids || []);
+      return `
+        <button
+          class="chat-source-ref"
+          type="button"
+          data-iid="${source.issue_iid}"
+          data-discussion-id="${escapeHtml(discussionId)}"
+          data-note-ids='${escapeHtml(noteIds)}'
+          title="${escapeHtml(source.title || '')}"
+          style="margin-right:6px;margin-top:6px; !"
+        >
+          #${source.issue_iid}${source.source_type === 'discussion' ? ' 留言' : ''}${index + 1}
+        </button>`;
+    })
+    .join('');
+
+  return `
+    <div class="chat-msg-sources" style="margin-top:10px;">
+      <div class="chat-msg-meta">來源依據</div>
+      <div>${items}</div>
+    </div>`;
+}
+
 async function sendChatMessage(input: HTMLInputElement): Promise<void> {
+  if (isRagQuestionLocked()) return;
+
   const question = input.value.trim();
   if (!question) return;
 
@@ -4956,13 +5194,12 @@ async function sendChatMessage(input: HTMLInputElement): Promise<void> {
   const sendBtn = document.getElementById('chat-send') as HTMLButtonElement | null;
   if (!msgs || !sendBtn) return;
 
-  // Add user message
   input.value = '';
-  sendBtn.disabled = true;
+  sendBtn.dataset.busy = 'true';
+  renderRagQuestionState();
   chatHistory.push({ role: 'user', content: question });
   appendChatMsg(msgs, 'user', escapeHtml(question));
 
-  // Show typing indicator
   const typingEl = document.createElement('div');
   typingEl.className = 'chat-msg assistant';
   typingEl.innerHTML = `
@@ -4975,14 +5212,18 @@ async function sendChatMessage(input: HTMLInputElement): Promise<void> {
   msgs.scrollTop = msgs.scrollHeight;
 
   try {
-    const result = await api<{ answer: string; model: string }>('/api/chat', 'POST', {
+    const result = await api<ChatResponse>('/api/chat', 'POST', {
       question,
-      history: chatHistory.slice(0, -1), // exclude current question (already in endpoint)
+      history: chatHistory.slice(0, -1),
       preferred_model: state.uiPreferences.geminiModel,
+      use_rag: true,
+      top_k: 6,
     });
+
     chatHistory.push({ role: 'assistant', content: result.answer });
     typingEl.remove();
-    appendChatMsg(msgs, 'assistant', formatChatAnswer(result.answer), result.model);
+
+    appendChatMsg(msgs, 'assistant', formatChatAnswer(result.answer), result.model, result.sources);
   } catch (err: any) {
     typingEl.remove();
     const errMsg = err?.message || '未知錯誤';
@@ -4992,19 +5233,66 @@ async function sendChatMessage(input: HTMLInputElement): Promise<void> {
       `<span style="color:var(--red-400)">發生錯誤：${escapeHtml(errMsg)}</span>`,
     );
   } finally {
-    sendBtn.disabled = false;
-    input.focus();
+    delete sendBtn.dataset.busy;
+    renderRagQuestionState();
+    if (!input.disabled) {
+      input.focus();
+    }
   }
 }
 
-function appendChatMsg(container: HTMLElement, role: string, html: string, model?: string): void {
+function appendChatMsg(
+  container: HTMLElement,
+  role: string,
+  html: string,
+  model?: string,
+  sources?: ChatSource[],
+): void {
   const el = document.createElement('div');
   el.className = `chat-msg ${role}`;
-  const metaHtml = model ? `<div class="chat-msg-meta">${escapeHtml(model)}</div>` : '';
-  el.innerHTML = `<div class="chat-msg-content">${html}</div>${metaHtml}`;
 
-  // Wire issue ref clicks
-  el.querySelectorAll('.issue-ref').forEach((ref) => {
+  const metaHtml = model ? `<div class="chat-msg-meta">${escapeHtml(model)}</div>` : '';
+  const sourcesHtml = renderChatSources(sources);
+
+  el.innerHTML = `<div class="chat-msg-content">${html}${sourcesHtml}</div>${metaHtml}`;
+
+  el.querySelectorAll('.chat-source-ref').forEach((ref) => {
+    ref.addEventListener('click', async () => {
+      const target = ref as HTMLElement;
+      const iid = Number(target.dataset.iid);
+      const discussionId = target.dataset.discussionId || null;
+
+      let noteIds: number[] = [];
+      try {
+        noteIds = JSON.parse(target.dataset.noteIds || '[]');
+      } catch {
+        noteIds = [];
+      }
+
+      state.pendingDiscussionJump = {
+        issue_iid: iid,
+        discussion_id: discussionId,
+        note_ids: noteIds,
+      };
+
+      const matchedIssue = state.allIssues.find((i) => i.iid === iid);
+      if (matchedIssue) {
+        openIssueDetail(matchedIssue);
+        return;
+      }
+
+      try {
+        const bundle = await api<IssueDetailBundle>(`/api/issues/detail-by-url`, 'POST', {
+          url: target.getAttribute('data-url') || '',
+        });
+        openIssueDetailWithBundle(bundle);
+      } catch (err) {
+        console.error('Open source issue failed', err);
+      }
+    });
+  });
+
+  el.querySelectorAll('.issue-ref:not(.chat-source-ref)').forEach((ref) => {
     ref.addEventListener('click', () => {
       const iid = Number((ref as HTMLElement).dataset.iid);
       const issue = state.allIssues.find((i) => i.iid === iid);
@@ -5039,6 +5327,188 @@ function formatChatAnswer(text: string): string {
   });
 
   return html;
+}
+
+let ragPollTimer: number | null = null;
+
+function ensureRagStatusBadge(): HTMLElement {
+  let badge = document.getElementById('rag-status-badge');
+  if (badge) return badge;
+
+  badge = document.createElement('section');
+  badge.id = 'rag-status-badge';
+  badge.className = 'rag-status-badge';
+  badge.setAttribute('aria-live', 'polite');
+  document.body.appendChild(badge);
+  return badge;
+}
+
+function renderRagStatusBadge(): void {
+  const badge = ensureRagStatusBadge();
+  const chatPanel = getById<HTMLElement>('chat-panel');
+  const hideForOpenChat = Boolean(chatPanel?.classList.contains('open'));
+
+  if (hideForOpenChat || (!state.ragUi.rebuilding && !state.ragUi.rebuildStatusText)) {
+    badge.className = 'rag-status-badge';
+    badge.innerHTML = '';
+    renderRagQuestionState();
+    return;
+  }
+
+  const tone = state.ragUi.rebuilding
+    ? 'syncing'
+    : state.ragUi.rebuildStatusText.startsWith('同步留言失敗')
+      ? 'error'
+      : 'ready';
+  const progress = Math.max(0, Math.min(100, Math.round(state.ragUi.rebuildProgress)));
+  const title = state.ragUi.rebuilding
+    ? '同步留言中'
+    : tone === 'error'
+      ? '同步失敗'
+      : '已同步留言';
+
+  badge.className = `rag-status-badge is-visible is-${tone}`;
+  badge.innerHTML = `
+    <div class="rag-status-badge__copy">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(state.ragUi.rebuildStatusText || '處理中')}</span>
+    </div>
+    ${
+      state.ragUi.rebuilding
+        ? `
+          <div class="rag-status-badge__progress">
+            <div class="rag-status-badge__bar"><span style="width:${progress}%"></span></div>
+            <div class="rag-status-badge__meta">${progress}%</div>
+          </div>`
+        : ''
+    }
+  `;
+  renderRagQuestionState();
+}
+
+async function refreshRagIndexAvailability(): Promise<void> {
+  try {
+    const status = await api<RagIndexStatus>('/api/rag/status');
+    state.ragUi.statusChecked = true;
+    state.ragUi.hasUsableIndex = Boolean(status.built_at && status.chunk_count > 0);
+    if (state.ragUi.hasUsableIndex) {
+      state.ragUi.rebuildFailedWithoutIndex = false;
+    }
+  } catch (err) {
+    console.error('Load rag status failed', err);
+    state.ragUi.statusChecked = true;
+  }
+  renderRagStatusBadge();
+}
+
+async function startRagRebuild(): Promise<void> {
+  if (state.ragUi.rebuilding) return;
+
+  state.ragUi.statusChecked = true;
+  state.ragUi.rebuildFailedWithoutIndex = false;
+  state.ragUi.rebuilding = true;
+  state.ragUi.rebuildProgress = 0;
+  state.ragUi.rebuildStatusText = '正在排入背景重建...';
+  renderRagStatusBadge();
+
+  try {
+    const result = await api<{ job_id: string; status: string }>('/api/rag/reindex', 'POST', {});
+    state.ragUi.rebuildJobId = result.job_id;
+    state.ragUi.rebuildStatusText = 'RAG index 背景重建中';
+    renderRagStatusBadge();
+    beginPollRagJob(result.job_id);
+  } catch (err: any) {
+    state.ragUi.rebuilding = false;
+    state.ragUi.rebuildStatusText = `重建失敗：${err?.message || '未知錯誤'}`;
+    renderRagStatusBadge();
+    window.setTimeout(() => {
+      state.ragUi.rebuildStatusText = '';
+      renderRagStatusBadge();
+    }, 3500);
+  }
+}
+
+function beginPollRagJob(jobId: string): void {
+  if (ragPollTimer) {
+    window.clearInterval(ragPollTimer);
+    ragPollTimer = null;
+  }
+
+  const tick = async () => {
+    try {
+      const job = await api<RagRebuildJob>(`/api/rag/jobs/${jobId}`);
+
+      state.ragUi.rebuildProgress = job.progress || 0;
+
+      if (job.status === 'queued') {
+        state.ragUi.rebuildStatusText = '等待背景工作啟動...';
+      } else if (job.status === 'running') {
+        state.ragUi.rebuildStatusText = `同步中：#${job.current_issue_iid ?? '-'} · ${job.chunk_count} chunks`;
+      } else if (job.status === 'completed') {
+        state.ragUi.rebuilding = false;
+        state.ragUi.hasUsableIndex = true;
+        state.ragUi.rebuildFailedWithoutIndex = false;
+        state.ragUi.rebuildProgress = 100;
+        state.ragUi.rebuildStatusText = `完成，共 ${job.result?.chunk_count ?? job.chunk_count} chunks`;
+        renderRagStatusBadge();
+
+        if (ragPollTimer) {
+          window.clearInterval(ragPollTimer);
+          ragPollTimer = null;
+        }
+
+        window.setTimeout(async () => {
+          try {
+            const status = await api<{
+              built_at: string | null;
+              issue_count: number;
+              indexed_issues: number;
+              skipped_issues: number;
+              chunk_count: number;
+            }>('/api/rag/status');
+            state.ragUi.rebuildStatusText = `最新索引 ${status.chunk_count} chunks`;
+            renderRagStatusBadge();
+            window.setTimeout(() => {
+              state.ragUi.rebuildStatusText = '';
+              renderRagStatusBadge();
+            }, 2500);
+          } catch {
+            state.ragUi.rebuildStatusText = '';
+            renderRagStatusBadge();
+          }
+        }, 800);
+
+        return;
+      } else if (job.status === 'failed') {
+        state.ragUi.rebuilding = false;
+        if (!state.ragUi.hasUsableIndex) {
+          state.ragUi.rebuildFailedWithoutIndex = true;
+        }
+        state.ragUi.rebuildStatusText = `同步留言失敗：${job.error || '未知錯誤'}`;
+        renderRagStatusBadge();
+
+        if (ragPollTimer) {
+          window.clearInterval(ragPollTimer);
+          ragPollTimer = null;
+        }
+
+        window.setTimeout(() => {
+          state.ragUi.rebuildStatusText = '';
+          renderRagStatusBadge();
+        }, 4000);
+        return;
+      }
+
+      renderRagStatusBadge();
+    } catch (err) {
+      console.error('Poll rag job failed', err);
+    }
+  };
+
+  void tick();
+  ragPollTimer = window.setInterval(() => {
+    void tick();
+  }, 1000);
 }
 
 /* ══════════════════════════════════════════════
