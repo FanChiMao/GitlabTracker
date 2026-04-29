@@ -65,13 +65,14 @@ const MAX_SIDEBAR_WIDTH = 360;
 const LOCAL_CONFIG_CACHE_KEY = 'gitlab-tracker:config-cache';
 const UI_PREFERENCES_KEY = 'gitlab-tracker:ui-preferences';
 const ARRANGE_PROMPT_TEMPLATES_KEY = 'gitlab-tracker:arrange-prompt-templates';
-const AVAILABLE_GEMINI_MODELS = ['gemini-2.5-pro', 'gemini-2.0-flash', 'gemma-4-31b-it'] as const;
+const DEFAULT_GEMINI_MODEL_LIST = ['gemini-2.5-pro', 'gemini-2.0-flash', 'gemma-4-31b-it'];
 const DEFAULT_GEMINI_MODEL = 'gemma-4-31b-it';
 const DEFAULT_UI_PREFERENCES = {
   theme: 'dark',
   scale: 100,
   sidebarWidth: 304,
   geminiModel: DEFAULT_GEMINI_MODEL,
+  geminiModelList: [...DEFAULT_GEMINI_MODEL_LIST],
   arrangePrompt: `你是一位資深技術 PM，請根據提供的 GitLab Issue 原始資料，整理成清楚、可追蹤的中文摘要。
 
 請用以下段落輸出：
@@ -258,13 +259,14 @@ type AnalyticsResponse = {
 };
 
 type ThemeMode = 'dark' | 'light';
-type GeminiModel = (typeof AVAILABLE_GEMINI_MODELS)[number];
+type GeminiModel = string;
 
 type UiPreferences = {
   theme: ThemeMode;
   scale: number;
   sidebarWidth: number;
   geminiModel: GeminiModel;
+  geminiModelList: string[];
   arrangePrompt: string;
 };
 
@@ -335,7 +337,7 @@ const state = {
   ganttMonth: '',
   ganttWeek: '',
   currentView: 'dashboard',
-  uiPreferences: { ...DEFAULT_UI_PREFERENCES } as UiPreferences,
+  uiPreferences: createDefaultUiPreferences(),
   arrangePromptTemplates: [] as ArrangePromptTemplate[],
   selectedArrangePromptTemplateId: '' as string,
   arrangeJobs: [] as ArrangeJob[],
@@ -400,24 +402,59 @@ function clampSidebarWidth(value: number): number {
   return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(value)));
 }
 
-function coerceGeminiModel(value: string | undefined): GeminiModel {
-  return AVAILABLE_GEMINI_MODELS.includes(value as GeminiModel)
-    ? (value as GeminiModel)
-    : DEFAULT_GEMINI_MODEL;
+function sanitizeGeminiModelList(value: unknown): string[] {
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/\r?\n/g)
+      : [];
+  const uniqueModels: string[] = [];
+  for (const rawValue of rawValues) {
+    const normalized = String(rawValue || '').trim();
+    if (normalized && !uniqueModels.includes(normalized)) {
+      uniqueModels.push(normalized);
+    }
+  }
+  return uniqueModels.length ? uniqueModels : [...DEFAULT_GEMINI_MODEL_LIST];
+}
+
+function coerceGeminiModel(value: string | undefined, candidates: string[]): GeminiModel {
+  const normalized = String(value || '').trim();
+  if (normalized) return normalized;
+  return candidates[0] || DEFAULT_GEMINI_MODEL;
+}
+
+function createDefaultUiPreferences(): UiPreferences {
+  return {
+    ...DEFAULT_UI_PREFERENCES,
+    geminiModelList: [...DEFAULT_UI_PREFERENCES.geminiModelList],
+  };
+}
+
+function syncGeminiModelSelect(select: HTMLSelectElement | null): void {
+  if (!select) return;
+  const models = sanitizeGeminiModelList(state.uiPreferences.geminiModelList);
+  const selectedModel = coerceGeminiModel(state.uiPreferences.geminiModel, models);
+  select.replaceChildren(
+    ...models.map((model) => new Option(model, model, false, model === selectedModel)),
+  );
+  select.value = selectedModel;
 }
 
 function readUiPreferences(): UiPreferences {
   try {
     const raw = window.localStorage.getItem(UI_PREFERENCES_KEY);
-    if (!raw) return { ...DEFAULT_UI_PREFERENCES };
+    if (!raw) return createDefaultUiPreferences();
     const parsed = JSON.parse(raw) as Partial<UiPreferences>;
+    const geminiModelList = sanitizeGeminiModelList(parsed.geminiModelList);
     return {
       theme: parsed.theme === 'light' ? 'light' : 'dark',
       scale: clampUiScale(Number(parsed.scale) || DEFAULT_UI_PREFERENCES.scale),
       sidebarWidth: clampSidebarWidth(
         Number(parsed.sidebarWidth) || DEFAULT_UI_PREFERENCES.sidebarWidth,
       ),
-      geminiModel: coerceGeminiModel(parsed.geminiModel),
+      geminiModel: coerceGeminiModel(parsed.geminiModel, geminiModelList),
+      geminiModelList,
       arrangePrompt:
         typeof parsed.arrangePrompt === 'string' && parsed.arrangePrompt.trim()
           ? parsed.arrangePrompt
@@ -425,7 +462,7 @@ function readUiPreferences(): UiPreferences {
     };
   } catch (error) {
     console.warn('Unable to read UI preferences', error);
-    return { ...DEFAULT_UI_PREFERENCES };
+    return createDefaultUiPreferences();
   }
 }
 
@@ -454,10 +491,20 @@ function applyUiPreferences(): void {
     promptField.value = state.uiPreferences.arrangePrompt;
   }
 
+  const geminiModelListField = getById<HTMLTextAreaElement>('pref-gemini-model-list');
+  const geminiModelListText = state.uiPreferences.geminiModelList.join('\n');
+  if (geminiModelListField && geminiModelListField.value !== geminiModelListText) {
+    geminiModelListField.value = geminiModelListText;
+  }
+
   const modelSelect = getById<HTMLSelectElement>('pref-gemini-model');
-  if (modelSelect) modelSelect.value = state.uiPreferences.geminiModel;
   const arrangeModelSelect = getById<HTMLSelectElement>('arrange-model-select');
-  if (arrangeModelSelect) arrangeModelSelect.value = state.uiPreferences.geminiModel;
+  syncGeminiModelSelect(modelSelect);
+  syncGeminiModelSelect(arrangeModelSelect);
+  state.uiPreferences.geminiModel = coerceGeminiModel(
+    state.uiPreferences.geminiModel,
+    state.uiPreferences.geminiModelList,
+  );
 
   const arrangeModelLabel = getById<HTMLElement>('arrange-model-label');
   if (arrangeModelLabel && !getSelectedArrangeJob()) {
@@ -490,7 +537,7 @@ function updateArrangePromptPreference(): void {
 function updateGeminiModelPreference(): void {
   const field = getById<HTMLSelectElement>('pref-gemini-model');
   if (!field) return;
-  state.uiPreferences.geminiModel = coerceGeminiModel(field.value);
+  state.uiPreferences.geminiModel = coerceGeminiModel(field.value, state.uiPreferences.geminiModelList);
   applyUiPreferences();
   saveUiPreferences();
 }
@@ -498,7 +545,19 @@ function updateGeminiModelPreference(): void {
 function updateArrangeGeminiModelPreference(): void {
   const field = getById<HTMLSelectElement>('arrange-model-select');
   if (!field) return;
-  state.uiPreferences.geminiModel = coerceGeminiModel(field.value);
+  state.uiPreferences.geminiModel = coerceGeminiModel(field.value, state.uiPreferences.geminiModelList);
+  applyUiPreferences();
+  saveUiPreferences();
+}
+
+function updateGeminiModelListPreference(): void {
+  const field = getById<HTMLTextAreaElement>('pref-gemini-model-list');
+  if (!field) return;
+  state.uiPreferences.geminiModelList = sanitizeGeminiModelList(field.value);
+  state.uiPreferences.geminiModel = coerceGeminiModel(
+    state.uiPreferences.geminiModel,
+    state.uiPreferences.geminiModelList,
+  );
   applyUiPreferences();
   saveUiPreferences();
 }
@@ -3745,6 +3804,7 @@ async function runArrangeScrapeJob(job: ArrangeJob, signal?: AbortSignal): Promi
         url: job.web_url,
         system_prompt: byId<HTMLTextAreaElement>('arrange-prompt').value.trim(),
         preferred_model: state.uiPreferences.geminiModel,
+        model_candidates: state.uiPreferences.geminiModelList,
       },
       { signal },
     );
@@ -3802,6 +3862,7 @@ async function runArrangeLlmJob(job: ArrangeJob, signal?: AbortSignal): Promise<
         raw_text: job.raw_text,
         system_prompt: byId<HTMLTextAreaElement>('arrange-prompt').value.trim(),
         preferred_model: state.uiPreferences.geminiModel,
+        model_candidates: state.uiPreferences.geminiModelList,
       },
       { signal },
     );
@@ -5382,6 +5443,7 @@ async function sendChatMessage(input: HTMLInputElement): Promise<void> {
       question,
       history: chatHistory.slice(0, -1),
       preferred_model: state.uiPreferences.geminiModel,
+      model_candidates: state.uiPreferences.geminiModelList,
       use_rag: true,
       top_k: 6,
     });
@@ -5794,6 +5856,7 @@ function wireEvents(): void {
     setArrangeHistoryPreviewMode('raw'),
   );
   bind<HTMLTextAreaElement>('arrange-prompt', 'input', () => updateArrangePromptPreference());
+  bind<HTMLTextAreaElement>('pref-gemini-model-list', 'input', () => updateGeminiModelListPreference());
   bind<HTMLInputElement>('arrange-history-search', 'input', () => renderArrangeHistoryList());
   bind<HTMLSelectElement>('arrange-history-kind', 'change', () => renderArrangeHistoryList());
   bind<HTMLSelectElement>('pref-gemini-model', 'change', () => updateGeminiModelPreference());

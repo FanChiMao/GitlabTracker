@@ -1,1 +1,28 @@
-/* preferences page styles placeholder. Move page-only selectors here when touching this page. */
+.preferences-grid {
+  align-items: stretch;
+}
+
+.preferences-grid .preference-panel {
+  height: 300px;
+  max-height: 300px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.preferences-grid .preference-panel .section-title-row {
+  flex: 0 0 auto;
+}
+
+.preferences-grid .preference-panel .preference-hint {
+  margin-bottom: 0;
+}
+
+#pref-gemini-model-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  resize: none;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
